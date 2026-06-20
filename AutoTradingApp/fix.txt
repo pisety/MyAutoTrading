@@ -1,0 +1,194 @@
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "수익률: ", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "${String.format(Locale.US, "%.2f", status.current_yield)}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (status.current_yield >= 0) Color(0xFFD32F2F) else Color(0xFF1976D2)
+                        )
+                    }
+                    Text(text = "최종 갱신: ${status.last_updated}", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+
+        item {
+            Text("보유 종목 현황", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+
+        if (status.holding_stocks.isEmpty()) {
+            item {
+                Text("보유 중인 종목이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
+            }
+        } else {
+            items(status.holding_stocks.toList()) { (symbol, stock) ->
+                HoldingStockItem(symbol, stock, isOverseas, onStopLossClick = { showStopLossDialog = symbol })
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = watchSymbolsInput,
+                onValueChange = { watchSymbolsInput = it },
+                label = { Text(if (isOverseas) "해외 감시 종목 (예: AAPL, TSLA)" else "국내 감시 종목 (예: 005930, 035420)") },
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    TextButton(onClick = { viewModel.updateWatchSymbols(watchSymbolsInput) }) {
+                        Text("저장")
+                    }
+                }
+            )
+        }
+
+        item {
+            Text("실시간 시세 및 주문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+
+        if (status.stock_prices.isEmpty()) {
+            item {
+                Text("감시 중인 종목이 없습니다.", color = Color.Gray)
+            }
+        } else {
+            items(status.stock_prices.toList()) { (symbol, price) ->
+                StockItem(
+                    symbol = symbol,
+                    name = status.stock_names[symbol] ?: symbol,
+                    price = price,
+                    isOverseas = isOverseas,
+                    onBuyClick = { showOrderDialog = symbol to "BUY" },
+                    onSellClick = { showOrderDialog = symbol to "SELL" }
+                )
+            }
+        }
+
+        item {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "자동매매 엔진 가동", fontWeight = FontWeight.Bold)
+                Switch(
+                    checked = settings.is_auto_trading,
+                    onCheckedChange = { viewModel.toggleAutoTrading(it) }
+                )
+            }
+            if (settings.is_auto_trading) {
+                OutlinedButton(
+                    onClick = { showSurgeDialog = true },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    Text("급등주 단타 감시 설정 (${if (settings.surge_trading.enabled) "ON" else "OFF"})")
+                }
+                
+                if (settings.surge_trading.enabled) {
+                    val activeSurge = settings.surge_trading.per_symbol_config.filter { it.value.buy_quantity > 0 }
+                    if (activeSurge.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("급등주 감시 현황", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        activeSurge.forEach { (sym, cfg) ->
+                            val name = status.stock_names[sym] ?: sym
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(name)
+                                Text("${cfg.time_window_seconds}초 / ${cfg.surge_percent_threshold}% / ${cfg.buy_quantity}주", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+fun HoldingStockItem(symbol: String, stock: HoldingStock, isOverseas: Boolean, onStopLossClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = stock.name.ifEmpty { symbol }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(text = "${stock.quantity}주", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
+                    val priceStr = if (isOverseas) "$${String.format(Locale.US, "%.2f", stock.current_price)}" else "₩${String.format(Locale.US, "%,.0f", stock.current_price)}"
+                    Text(text = priceStr, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "${String.format(Locale.US, "%.2f", stock.yield)}%",
+                        color = if (stock.yield >= 0) Color(0xFFD32F2F) else Color(0xFF1976D2),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = onStopLossClick,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("손절", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StockItem(
+    symbol: String,
+    name: String,
+    price: Double,
+    isOverseas: Boolean,
+    onBuyClick: () -> Unit,
+    onSellClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                val priceStr = if (isOverseas) "$${String.format(Locale.US, "%.2f", price)}" else "₩${String.format(Locale.US, "%,.0f", price)}"
+                Text(text = priceStr, style = MaterialTheme.typography.bodyMedium)
+            }
+            Row {
+                Button(
+                    onClick = onBuyClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Text("매수", color = Color.White)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onSellClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Text("매도", color = Color.White)
+                }
+            }
+        }
+    }
+}
