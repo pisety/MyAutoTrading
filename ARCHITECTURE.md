@@ -11,20 +11,20 @@
 ```mermaid
 flowchart TD
     subgraph Client ["📱 Android App (Kotlin/Compose)"]
-        UI[UI: Jetpack Compose]
-        VM[ViewModel: StateFlow]
-        FB_Client[Firebase RTDB Client]
+        UI["UI: Jetpack Compose"]
+        VM["ViewModel: StateFlow"]
+        FB_Client["Firebase RTDB Client"]
     end
 
     subgraph Database ["☁️ Firebase Realtime Database"]
-        RTDB[(Realtime Database\nJSON Tree)]
+        RTDB[("Realtime Database\nJSON Tree")]
     end
 
     subgraph Backend ["🐍 Python Trading Engine (Asyncio)"]
-        FB_Server[Firebase Admin SDK]
-        Watcher[Surge Monitor (급등 감시)]
-        Broker_KR[한국투자증권 API]
-        Broker_Crypto[Upbit API]
+        FB_Server["Firebase Admin SDK"]
+        Watcher["Surge Monitor (급등 감시)"]
+        Broker_KR["한국투자증권 API"]
+        Broker_Crypto["Upbit API"]
     end
 
     %% 데이터 흐름
