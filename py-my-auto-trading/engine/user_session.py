@@ -211,13 +211,18 @@ class UserSession:
             if cmd in ["BUY", "SELL"]:
                 sym = data.get("symbol")
                 qty = float(data.get("quantity", 1))
-                asyncio.run_coroutine_threadsafe(self._execute_manual_order(cmd, sym, qty), self._loop)
+                price = float(data.get("price", 0.0))
+                asyncio.run_coroutine_threadsafe(self._execute_manual_order(cmd, sym, qty, price), self._loop)
 
-    async def _execute_manual_order(self, cmd, sym, qty):
+    async def _execute_manual_order(self, cmd, sym, qty, price):
         if not self.broker:
             return
-        price = self.price_data.get(sym)
-        if not price:
+        
+        # 사용자가 입력한 가격이 없거나 0이면 현재가 사용
+        if not price or price <= 0.0:
+            price = self.price_data.get(sym)
+            
+        if not price or price <= 0.0:
             logger.warning(f"[{self.uid}] Cannot execute manual order: No price data for {sym}")
             return
             

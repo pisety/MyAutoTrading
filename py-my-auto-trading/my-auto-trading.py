@@ -3,6 +3,9 @@ import asyncio
 import logging
 from dotenv import load_dotenv
 
+# Load env vars before importing other modules
+load_dotenv()
+
 from database.firebase_client import FirebaseClient
 from engine.user_manager import UserManager
 
