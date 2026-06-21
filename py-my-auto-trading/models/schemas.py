@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Optional, List
 
 class SymbolSurgeConfig(BaseModel):
@@ -10,6 +10,19 @@ class SurgeTradingConfig(BaseModel):
     enabled: bool = False
     allow_extended_hours: bool = True
     per_symbol_config: Dict[str, List[SymbolSurgeConfig]] = Field(default_factory=dict)
+
+    @field_validator('per_symbol_config', mode='before')
+    @classmethod
+    def convert_legacy_config(cls, v):
+        if not isinstance(v, dict):
+            return v
+        new_v = {}
+        for sym, cfg in v.items():
+            if isinstance(cfg, dict):
+                new_v[sym] = [cfg]
+            else:
+                new_v[sym] = cfg
+        return new_v
 
 class SymbolConfig(BaseModel):
     enabled: bool = False

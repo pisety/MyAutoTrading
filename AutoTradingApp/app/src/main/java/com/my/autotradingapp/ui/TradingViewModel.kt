@@ -363,6 +363,12 @@ class TradingViewModel : ViewModel() {
                     if (newPinToSet.isNotEmpty()) {
                         accRef.child("pin").setValue(CryptoUtils.encrypt(newPinToSet))
                     }
+                    database.getReference("$servicePath/status").removeValue()
+                    if (serviceType == "crypto") {
+                        _cryptoStatus.value = TradingStatus()
+                    } else {
+                        _stockStatus.value = TradingStatus()
+                    }
                     onComplete(true, "저장 완료")
                 }
                 .addOnFailureListener { onComplete(false, "저장 실패: ${it.message}") }
@@ -421,6 +427,12 @@ class TradingViewModel : ViewModel() {
             .addOnFailureListener { Log.e("TradingApp", "Failed to save account: ${it.message}") }
             
         accRef.child("active_account_id").setValue(key)
+        database.getReference("$servicePath/status").removeValue()
+        if (serviceType == "crypto") {
+            _cryptoStatus.value = TradingStatus()
+        } else {
+            _stockStatus.value = TradingStatus()
+        }
     }
 
     fun toggleAutoTrading(enabled: Boolean, serviceType: String) {

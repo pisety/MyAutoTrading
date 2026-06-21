@@ -5,7 +5,7 @@ echo ===================================================
 
 set KEY_PATH=D:\01.SW\03.Tool\01.AndroidStudio\AndroidStudioProjects\my-auto-trading\oracle\key\ssh-key-2026-06-05.key
 set SERVER=ubuntu@134.185.115.222
-set BASE_DIR=D:\01.SW\03.Tool\01.AndroidStudio\AndroidStudioProjects\py-my-auto-trading
+set BASE_DIR=D:\01.SW\03.Tool\01.AndroidStudio\AndroidStudioProjects\MyAutoTrading\py-my-auto-trading
 
 echo.
 echo [1/2] Uploading files to Oracle Cloud...

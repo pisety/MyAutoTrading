@@ -26,11 +26,13 @@ class UserManager:
                 uid = parts[0]
                 if event.data is None:
                     # Node was deleted, so we must stop and remove both sessions
-                    for stype in ("stock", "crypto"):
-                        key = f"{uid}_{stype}"
-                        if key in self.sessions:
-                            session = self.sessions.pop(key)
-                            asyncio.run_coroutine_threadsafe(session.stop(), self._loop)
+                    # ONLY IF the root user node was deleted
+                    if len(parts) == 1:
+                        for stype in ("stock", "crypto"):
+                            key = f"{uid}_{stype}"
+                            if key in self.sessions:
+                                session = self.sessions.pop(key)
+                                asyncio.run_coroutine_threadsafe(session.stop(), self._loop)
                 else:
                     self._loop.call_soon_threadsafe(self._ensure_session, uid)
 

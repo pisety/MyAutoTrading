@@ -23,7 +23,8 @@ flowchart TD
     subgraph Backend ["🐍 Python Trading Engine (Asyncio)"]
         FB_Server["Firebase Admin SDK"]
         Watcher["Surge Monitor (급등 감시)"]
-        Broker_KR["한국투자증권 API"]
+        Broker_KIS["한국투자증권 API"]
+        Broker_Kiwoom["키움증권 REST API"]
         Broker_Crypto["Upbit API"]
     end
 
@@ -34,7 +35,8 @@ flowchart TD
     RTDB <==>|Event Listener| FB_Server
     FB_Server -->|Update Config| Watcher
     
-    Watcher <-->|Fetch Price & Order| Broker_KR
+    Watcher <-->|Fetch Price & Order| Broker_KIS
+    Watcher <-->|Fetch Price & Order| Broker_Kiwoom
     Watcher <-->|Fetch Price & Order| Broker_Crypto
 ```
 
@@ -72,13 +74,31 @@ flowchart TD
 
 ### 3.2 Python Engine (`py-my-auto-trading/`)
 - **`my-auto-trading.py` (엔트리 포인트):** 메인 실행 파일이며, 로거(Logger) 세팅 및 모든 백그라운드 루프(asyncio.gather)를 실행시킵니다.
-- **`user_session.py`:** Firebase와의 통신을 전담하며, 상태(Status)를 업데이트하거나 앱에서 넘어오는 명령(Commands)과 설정(Settings)을 콜백으로 받아 처리합니다.
-- **`surge_monitor.py`:** 가격 변동 이력을 메모리(deque)에 저장하고, 각 종목별로 사용자가 설정한 다중 급등 조건이 만족되었는지 계산하는 핵심 트레이딩 알고리즘입니다.
-- **`koreainvestment.py` / `upbit.py`:** 실제 증권사(한국투자증권)와 코인 거래소(Upbit) API와 통신하여 주문을 넣거나 호가를 조회하는 래퍼(Wrapper) 모듈입니다.
-- **`schemas.py`:** Python 측 데이터 모델 클래스들(Pydantic 또는 Dataclass)이 정의되어 있으며, Android의 `TradingModels.kt`와 구조가 1:1로 매칭되어야 합니다.
+- **`engine/user_manager.py`:** 다중 사용자 세션을 관리합니다. Firebase의 `users` 경로를 리스닝하여 사용자별 주식/코인 세션을 자동으로 생성하고 파괴합니다. 하위 경로 삭제 시 세션이 잘못 종료되지 않도록 보호 로직이 포함되어 있습니다.
+- **`engine/user_session.py`:** Firebase와의 통신을 전담하며, 상태(Status)를 업데이트하거나 앱에서 넘어오는 명령(Commands)과 설정(Settings)을 콜백으로 받아 처리합니다.
+- **`brokers/kis_broker.py`:** 한국투자증권(KIS) REST API 래퍼. 토큰 캐싱(`.kis_token_*.json`)을 지원하여 계좌 전환 시 재인증 지연을 방지합니다.
+- **`brokers/kiwoom_broker.py`:** 키움증권 REST API 래퍼. 실전/모의 투자 도메인 자동 분기(`api.kiwoom.com` / `mockapi.kiwoom.com`), 잔고조회(`kt00004`, `kt00018`), 주문(`kt10000`, `kt10001`), 웹소켓 실시간 시세(`0B`) 지원.
+- **`brokers/upbit_broker.py`:** Upbit 코인 거래소 API 래퍼. 웹소켓을 통한 실시간 체결가 수신을 지원합니다.
+- **`models/schemas.py`:** Python 측 데이터 모델 클래스들(Pydantic 또는 Dataclass)이 정의되어 있으며, Android의 `TradingModels.kt`와 구조가 1:1로 매칭되어야 합니다.
+
+### 3.3 배포 및 운영 스크립트
+- **`deploy.bat`:** 모든 파이썬 소스를 Oracle Cloud 서버에 업로드하고 엔진을 재시작하는 일괄 배포 스크립트.
+- **`server.bat`:** 서버 관리 통합 스크립트 (`deploy`, `upload`, `restart`, `log`, `ssh`, `status` 서브커맨드 지원).
 
 ---
 
-## 4. 향후 확장 및 유지보수 가이드
+## 4. 지원 증권사/거래소
+
+| 증권사/거래소 | 자산 유형 | 실전/모의 | API 방식 |
+|---|---|---|---|
+| 한국투자증권 (KIS) | 국내주식, 해외주식 | 실전 + 모의 | REST + WebSocket |
+| 키움증권 | 국내주식 | 실전 + 모의 | REST + WebSocket |
+| 업비트 (Upbit) | 가상화폐 | 실전 | REST + WebSocket |
+
+---
+
+## 5. 향후 확장 및 유지보수 가이드
+- **새로운 증권사 추가 시:** `brokers/base_broker.py`의 `BaseBroker` 추상 클래스를 상속하여 새 브로커를 구현하고, `engine/user_session.py`의 `_setup_broker()`에 분기 로직을 추가합니다.
 - **새로운 설정 필드 추가 시:** 안드로이드의 `TradingModels.kt`와 파이썬의 `schemas.py` 양쪽에 동시에 새로운 변수(Property)를 추가해야 Firebase 직렬화/역직렬화 시 에러가 나지 않습니다.
+- **토큰 캐싱:** KIS와 키움증권 모두 Access Token을 로컬 파일에 캐싱합니다. 계좌 전환 시 불필요한 재인증(1분+ 지연)을 방지하기 위한 핵심 최적화입니다.
 - **키 관리:** 절대 GitHub나 외부에 `keys.json`, `google-services.json`의 원본 데이터를 올리지 마세요. 템플릿 파일 구조만 유지합니다.

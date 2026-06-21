@@ -28,6 +28,18 @@ class KISBroker(BaseBroker):
         now = time.time()
         if self.access_token and (self.token_expires_at - now > 3600):
             return True
+        token_file = f".kis_token_{self.app_key[:10] if self.app_key else 'default'}.json"
+        try:
+            import os, json
+            if os.path.exists(token_file):
+                with open(token_file, 'r') as f:
+                    cache = json.load(f)
+                    if cache.get("access_token") and (cache.get("token_expires_at", 0) - now > 3600):
+                        self.access_token = cache["access_token"]
+                        self.token_expires_at = cache["token_expires_at"]
+                        return True
+        except Exception:
+            pass
 
         headers = {"content-type": "application/json"}
         body = {
@@ -46,6 +58,11 @@ class KISBroker(BaseBroker):
                         self.access_token = data["access_token"]
                         expires_in = int(data.get("expires_in", 86400))
                         self.token_expires_at = now + expires_in
+                        try:
+                            with open(token_file, 'w') as f:
+                                json.dump({"access_token": self.access_token, "token_expires_at": self.token_expires_at}, f)
+                        except Exception:
+                            pass
                         logger.info(f"KIS Token issued for account: {self.account_number}")
                         return True
                     else:

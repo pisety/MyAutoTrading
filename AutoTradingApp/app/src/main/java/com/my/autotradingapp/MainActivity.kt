@@ -11,7 +11,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.composed
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -342,6 +349,17 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
     }
 
     if (showPinDialog) {
+        val onPinConfirm = {
+            val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
+            if (verifyPinInput == decryptedPin) {
+                isPinVerified = true
+                showPinDialog = false
+                verifyPinInput = ""
+                prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
+            } else {
+                Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
+            }
+        }
         AlertDialog(
             onDismissRequest = { 
                 showPinDialog = false
@@ -353,22 +371,14 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                     value = verifyPinInput,
                     onValueChange = { verifyPinInput = it },
                     label = { Text("비밀번호") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
                     visualTransformation = PasswordVisualTransformation()
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
-                    if (verifyPinInput == decryptedPin) {
-                        isPinVerified = true
-                        showPinDialog = false
-                        verifyPinInput = ""
-                        prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
-                    } else {
-                        Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
-                    }
-                }) { Text("확인") }
+                Button(onClick = onPinConfirm) { Text("확인") }
             },
             dismissButton = {
                 TextButton(onClick = {
@@ -391,6 +401,8 @@ fun StockTradingScreen(
     val orderStatus by viewModel.manualOrderStatus.collectAsState()
     val context = LocalContext.current
     var showHoldings by remember { mutableStateOf(true) }
+    var showWatchList by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
     
     LaunchedEffect(orderStatus) {
         orderStatus?.let {
@@ -796,9 +808,11 @@ fun StockTradingScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp)
+            .mouseScroll(listState),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -896,6 +910,9 @@ fun StockTradingScreen(
                 onValueChange = { watchSymbolsInput = it },
                 label = { Text(if (isOverseas) "해외 감시 종목 (예: AAPL, TSLA)" else "국내 감시 종목 (예: 005930, 035420)") },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { viewModel.updateWatchSymbols(watchSymbolsInput, "stock") }),
                 trailingIcon = {
                     TextButton(onClick = { viewModel.updateWatchSymbols(watchSymbolsInput, "stock") }) {
                         Text("저장")
@@ -905,22 +922,34 @@ fun StockTradingScreen(
         }
 
         item {
-            Text("실시간 시세 및 주문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showWatchList = !showWatchList }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("실시간 시세 및 주문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(if (showWatchList) "▲" else "▼", color = Color.Gray)
+            }
         }
 
-        if (status.stock_prices.isEmpty()) {
-            item {
-                Text("감시 중인 종목이 없습니다.", color = Color.Gray)
-            }
-        } else {
-            items(status.stock_prices.toList()) { (symbol, price) ->
-                StockItem(
-                    symbol = symbol,
-                    name = status.stock_names[symbol] ?: symbol,
-                    price = price,
-                    isOverseas = isOverseas,
-                    onBuyClick = { showOrderDialog = symbol to "BUY" }
-                )
+        if (showWatchList) {
+            if (status.stock_prices.isEmpty()) {
+                item {
+                    Text("감시 중인 종목이 없습니다.", color = Color.Gray)
+                }
+            } else {
+                items(status.stock_prices.toList()) { (symbol, price) ->
+                    StockItem(
+                        symbol = symbol,
+                        name = status.stock_names[symbol] ?: symbol,
+                        price = price,
+                        isOverseas = isOverseas,
+                        onBuyClick = { showOrderDialog = symbol to "BUY" }
+                    )
+                }
             }
         }
 
@@ -1170,6 +1199,17 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
     }
 
     if (showPinDialog) {
+        val onPinConfirm = {
+            val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
+            if (verifyPinInput == decryptedPin) {
+                isPinVerified = true
+                showPinDialog = false
+                verifyPinInput = ""
+                prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
+            } else {
+                Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
+            }
+        }
         AlertDialog(
             onDismissRequest = { 
                 showPinDialog = false
@@ -1181,22 +1221,14 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
                     value = verifyPinInput,
                     onValueChange = { verifyPinInput = it },
                     label = { Text("비밀번호") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
                     visualTransformation = PasswordVisualTransformation()
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
-                    if (verifyPinInput == decryptedPin) {
-                        isPinVerified = true
-                        showPinDialog = false
-                        verifyPinInput = ""
-                        prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
-                    } else {
-                        Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
-                    }
-                }) { Text("확인") }
+                Button(onClick = onPinConfirm) { Text("확인") }
             },
             dismissButton = {
                 TextButton(onClick = {
@@ -1219,6 +1251,8 @@ fun CryptoTradingScreen(
     val orderStatus by viewModel.manualOrderStatus.collectAsState()
     val context = LocalContext.current
     var showHoldings by remember { mutableStateOf(true) }
+    var showWatchList by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
     
     LaunchedEffect(orderStatus) {
         orderStatus?.let {
@@ -1600,9 +1634,11 @@ fun CryptoTradingScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp)
+            .mouseScroll(listState),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -1699,6 +1735,9 @@ fun CryptoTradingScreen(
                 onValueChange = { watchSymbolsInput = it },
                 label = { Text("코인 감시 종목 (예: BTC, ETH)") },
                 modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { viewModel.updateWatchSymbols(watchSymbolsInput, "crypto") }),
                 trailingIcon = {
                     TextButton(onClick = { viewModel.updateWatchSymbols(watchSymbolsInput, "crypto") }) {
                         Text("저장")
@@ -1708,22 +1747,34 @@ fun CryptoTradingScreen(
         }
 
         item {
-            Text("실시간 시세 및 주문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showWatchList = !showWatchList }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("실시간 시세 및 주문", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(if (showWatchList) "▲" else "▼", color = Color.Gray)
+            }
         }
 
-        if (status.stock_prices.isEmpty()) {
-            item {
-                Text("감시 중인 코인이 없습니다.", color = Color.Gray)
-            }
-        } else {
-            items(status.stock_prices.toList()) { (symbol, price) ->
-                StockItem(
-                    symbol = symbol,
-                    name = status.stock_names[symbol] ?: symbol,
-                    price = price,
-                    isOverseas = false,
-                    onBuyClick = { showOrderDialog = symbol to "BUY" }
-                )
+        if (showWatchList) {
+            if (status.stock_prices.isEmpty()) {
+                item {
+                    Text("감시 중인 코인이 없습니다.", color = Color.Gray)
+                }
+            } else {
+                items(status.stock_prices.toList()) { (symbol, price) ->
+                    StockItem(
+                        symbol = symbol,
+                        name = status.stock_names[symbol] ?: symbol,
+                        price = price,
+                        isOverseas = false,
+                        onBuyClick = { showOrderDialog = symbol to "BUY" }
+                    )
+                }
             }
         }
 
@@ -1890,6 +1941,28 @@ fun StockItem(
                 contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
                 Text("매수", color = Color.White)
+            }
+        }
+    }
+}
+
+fun Modifier.mouseScroll(state: LazyListState): Modifier = composed {
+    val coroutineScope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    this.pointerInput(Unit) {
+        val scrollAmount = with(density) { 64.dp.toPx() }
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                if (event.type == PointerEventType.Scroll) {
+                    val delta = event.changes.first().scrollDelta.y
+                    if (delta != 0f) {
+                        event.changes.forEach { it.consume() }
+                        coroutineScope.launch {
+                            state.scrollBy(delta * scrollAmount)
+                        }
+                    }
+                }
             }
         }
     }

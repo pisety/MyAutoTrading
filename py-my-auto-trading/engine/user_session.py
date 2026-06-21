@@ -37,6 +37,7 @@ class UserSession:
         self._restart_task = None
         self._running = False
         self._loop = asyncio.get_event_loop()
+        self._last_rest_price = 0.0
 
     @property
     def base_path(self):
@@ -193,6 +194,7 @@ class UserSession:
         for s in removed_symbols:
             self.price_data.pop(s, None)
             
+        self._last_rest_price = 0.0
         self._restart_websocket()
             
     def _on_account_change(self, event):
@@ -271,7 +273,6 @@ class UserSession:
     async def _session_loop(self):
         last_sync = 0.0
         self._last_balance_check = 0.0
-        last_rest_price = 0.0
         
         while self._running:
             now = time.time()
@@ -316,7 +317,7 @@ class UserSession:
                 self.fb.update_data(f"{self.base_path}/status", status_update)
                 self._last_balance_check = now
                 
-            if self.broker and (now - last_rest_price >= 30.0):
+            if self.broker and (now - self._last_rest_price >= 30.0):
                 symbols = [s for s, v in self.settings.watch_symbols.items() if v.enabled]
                 stale_symbols = []
                 for sym in symbols:
@@ -329,7 +330,7 @@ class UserSession:
                     for sym, price in rest_prices.items():
                         self._on_ws_price(sym, price)
                             
-                last_rest_price = now
+                self._last_rest_price = now
                     
                 # Sync missing stock names
                 for sym in symbols:
