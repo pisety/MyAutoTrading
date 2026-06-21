@@ -170,7 +170,7 @@ class UpbitBroker(BaseBroker):
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as res:
                     if res.status == 200:
                         data = await res.json()
-                        return {item["code"]: float(item["trade_price"]) for item in data}
+                        return {item["market"]: float(item["trade_price"]) for item in data}
                     else:
                         logger.warning(f"Upbit ticker error ({res.status}): {await res.text()}")
         except Exception as e:
