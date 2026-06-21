@@ -5,7 +5,12 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 
 # Must match the Android key exactly
-SECRET_KEY = b"MyAutoTradingSuperSecretKey12345"
+# Read from environment variable (set in .env file on server)
+_key_str = os.environ.get("AES_SECRET_KEY", "")
+if not _key_str:
+    raise RuntimeError("AES_SECRET_KEY environment variable is not set. "
+                       "Please set it in the .env file on the server.")
+SECRET_KEY = _key_str.encode("utf-8")
 
 def decrypt(cipher_text: str) -> str:
     if not cipher_text:

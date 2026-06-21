@@ -6,9 +6,11 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import java.security.SecureRandom
 
+import com.my.autotradingapp.BuildConfig
+
 object CryptoUtils {
-    // 32-byte key for AES-256
-    private val SECRET_KEY = "MyAutoTradingSuperSecretKey12345".toByteArray(Charsets.UTF_8)
+    // AES key injected from local.properties via BuildConfig (not hardcoded)
+    private val SECRET_KEY = BuildConfig.AES_SECRET_KEY.toByteArray(Charsets.UTF_8)
 
     fun encrypt(plainText: String): String {
         if (plainText.isEmpty()) return ""

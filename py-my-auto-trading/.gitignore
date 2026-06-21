@@ -23,3 +23,10 @@ oracle/key/
 # VSCode / IDE
 .vscode/
 .idea/
+
+# Deployment scripts (contain server IP)
+deploy.bat
+server.bat
+
+# Patch scripts (temporary)
+patch*.py
