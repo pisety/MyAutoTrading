@@ -160,9 +160,11 @@ class UpbitBroker(BaseBroker):
             return None, None, None
 
     async def _fetch_ticker_prices(self, markets: List[str]) -> Dict[str, float]:
-        """내부 헬퍼: GET /v1/ticker 로 여러 마켓의 현재가를 한 번에 조회."""
+        """내부 헬퍼: GET /v1/ticker 로 여러 마켓의 현재가를 한 번에 조회. 상장폐지 코인 포함 시 404 에러 폴백 처리."""
         if not markets:
             return {}
+        
+        prices = {}
         try:
             async with aiohttp.ClientSession() as session:
                 params = {"markets": ",".join(markets)}
@@ -171,11 +173,23 @@ class UpbitBroker(BaseBroker):
                     if res.status == 200:
                         data = await res.json()
                         return {item["market"]: float(item["trade_price"]) for item in data}
+                    elif res.status == 404:
+                        logger.warning("Upbit ticker bulk fetch 404. Falling back to individual fetch to skip delisted coins.")
+                        for m in markets:
+                            try:
+                                async with session.get(url, params={"markets": m}, timeout=aiohttp.ClientTimeout(total=5)) as single_res:
+                                    if single_res.status == 200:
+                                        data = await single_res.json()
+                                        if data and len(data) > 0:
+                                            prices[data[0]["market"]] = float(data[0]["trade_price"])
+                            except Exception as ex:
+                                logger.debug(f"Skip market {m}: {ex}")
+                        return prices
                     else:
                         logger.warning(f"Upbit ticker error ({res.status}): {await res.text()}")
         except Exception as e:
             logger.error(f"Upbit ticker fetch error: {e}")
-        return {}
+        return prices
 
     async def execute_order(self, symbol: str, side: str, qty: float, price: float, allow_extended_hours: bool) -> Tuple[bool, str]:
         """
