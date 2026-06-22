@@ -229,6 +229,7 @@ class UserSession:
         success, err_msg = await self.broker.execute_order(sym, cmd, qty, price, True)
         if success:
             logger.info(f"[{self.uid}] Manual order executed: {cmd} {sym} {qty}")
+            self.fb.send_push_notification(self.uid, "수동 주문 체결", f"[{sym}] {cmd} {qty} 주문이 체결되었습니다.")
             self.fb.update_data(f"{self.base_path}/manual_orders", {
                 "command": "NONE",
                 "status": "SUCCESS",
@@ -363,6 +364,7 @@ class UserSession:
                 # 목표가 도달 시 시장가(0.0)로 전송하여 즉시 체결 유도
                 success, _ = await self.broker.execute_order(order.symbol, order.side, order.quantity, 0.0, order.allow_extended_hours)
                 if success:
+                    self.fb.send_push_notification(self.uid, "조건부 주문 체결", f"[{order.symbol}] {order.side} {order.quantity} 주문이 체결되었습니다.")
                     self.fb.update_data(f"{self.base_path}/conditional_orders/{oid}", {
                         "status": "EXECUTED",
                         "executed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -392,6 +394,7 @@ class UserSession:
                     # 손절은 무조건 시장가(0.0)로 전송하여 즉시 체결 유도
                     success, _ = await self.broker.execute_order(order.symbol, "SELL", qty, 0.0, order.allow_extended_hours)
                     if success:
+                        self.fb.send_push_notification(self.uid, "자동 손절매 체결", f"[{order.symbol}] SELL {qty} 주문이 체결되었습니다.")
                         self.fb.update_data(f"{self.base_path}/stop_loss_orders/{oid}", {
                             "status": "EXECUTED",
                             "executed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -443,4 +446,5 @@ class UserSession:
     async def _execute_surge_buy(self, symbol, qty, price, allow_extended):
         success, _ = await self.broker.execute_order(symbol, "BUY", qty, price, allow_extended)
         if success:
+            self.fb.send_push_notification(self.uid, "급등주 매수 체결", f"[{symbol}] BUY {qty} 주문이 체결되었습니다.")
             self.last_surge_buy_time[symbol] = time.time()

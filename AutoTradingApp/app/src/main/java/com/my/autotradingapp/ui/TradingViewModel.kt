@@ -396,6 +396,13 @@ class TradingViewModel : ViewModel() {
         }
     }
 
+    fun saveFcmToken(token: String) {
+        val id = _userId.value
+        if (id.isNotEmpty()) {
+            database.reference.child("users").child(id).child("fcm_token").setValue(token)
+        }
+    }
+
     fun saveAccount(info: AccountInfo, serviceType: String) {
         val id = _userId.value
         val servicePath = getServicePath(id, serviceType)

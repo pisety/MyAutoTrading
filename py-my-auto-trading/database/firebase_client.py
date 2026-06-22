@@ -74,3 +74,25 @@ class FirebaseClient:
                 logger.info(f"Removed listener for path: {path}")
             except Exception as e:
                 logger.error(f"Error closing listener for {path}: {e}")
+
+    def send_push_notification(self, user_id: str, title: str, body: str):
+        try:
+            from firebase_admin import messaging
+            # 1. FCM Token 조회
+            token = self.get_data(f"users/{user_id}/fcm_token")
+            if not token:
+                logger.warning(f"No FCM token found for user {user_id}. Cannot send push notification.")
+                return
+
+            # 2. 메시지 생성 및 전송
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body
+                ),
+                token=token
+            )
+            response = messaging.send(message)
+            logger.info(f"Successfully sent push notification to {user_id}: {response}")
+        except Exception as e:
+            logger.error(f"Failed to send push notification to {user_id}: {e}")

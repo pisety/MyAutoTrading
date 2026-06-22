@@ -66,6 +66,7 @@ dependencies {
     // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database)
+    implementation("com.google.firebase:firebase-messaging")
 
     // Retrofit (네트워크 통신 핵심 라이브러리)
     implementation("com.squareup.retrofit2:retrofit:2.9.0")

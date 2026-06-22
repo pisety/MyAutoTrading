@@ -40,6 +40,11 @@ import com.my.autotradingapp.ui.theme.AutoTradingAppTheme
 import com.my.autotradingapp.utils.CryptoUtils
 import java.text.NumberFormat
 import java.util.*
+import android.os.Build
+import androidx.core.content.ContextCompat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +63,32 @@ class MainActivity : ComponentActivity() {
 fun MainContent(viewModel: TradingViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("주식", "코인")
+    
+    val currentUserId by viewModel.userId.collectAsState()
+    val context = LocalContext.current
+    
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted -> }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
+            if (permission != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    LaunchedEffect(currentUserId) {
+        if (currentUserId.isNotEmpty()) {
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    viewModel.saveFcmToken(task.result)
+                }
+            }
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -73,6 +104,8 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
         Column(
             modifier = Modifier
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .imePadding()
                 .fillMaxSize()
         ) {
             TabRow(selectedTabIndex = selectedTab) {
@@ -769,7 +802,11 @@ fun StockTradingScreen(
                 val isAllValid = watchSymbolsList.all { sym ->
                     val ids = symConfigs[sym] ?: emptyList()
                     if (ids.isEmpty()) true
-                    else ids.all { id -> (buyQuantities[id]?.toDoubleOrNull() ?: 0.0) > 0.0 }
+                    else ids.all { id ->
+                        val qStr = buyQuantities[id]
+                        if (qStr.isNullOrBlank()) true
+                        else (qStr.toDoubleOrNull() ?: 0.0) > 0.0
+                    }
                 }
                 Button(
                     enabled = isAllValid,
@@ -1595,7 +1632,11 @@ fun CryptoTradingScreen(
                 val isAllValid = watchSymbolsList.all { sym ->
                     val ids = symConfigs[sym] ?: emptyList()
                     if (ids.isEmpty()) true
-                    else ids.all { id -> (buyQuantities[id]?.toDoubleOrNull() ?: 0.0) > 0.0 }
+                    else ids.all { id ->
+                        val qStr = buyQuantities[id]
+                        if (qStr.isNullOrBlank()) true
+                        else (qStr.toDoubleOrNull() ?: 0.0) > 0.0
+                    }
                 }
                 Button(
                     enabled = isAllValid,

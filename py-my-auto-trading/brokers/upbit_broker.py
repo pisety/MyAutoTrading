@@ -128,7 +128,12 @@ class UpbitBroker(BaseBroker):
 
                 for c in coin_entries:
                     market = f"KRW-{c['currency']}"
-                    current_price = current_prices.get(market, 0.0)
+                    
+                    # 상장폐지되거나 원화 마켓에서 지원하지 않아 현재가를 알 수 없는 코인은 완전히 제외
+                    if market not in current_prices:
+                        continue
+                        
+                    current_price = current_prices[market]
                     qty = c["total_qty"]
                     avg_price = c["avg_buy_price"]
 
