@@ -45,7 +45,7 @@ import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.firebase.messaging.FirebaseMessaging
-
+import com.my.autotradingapp.ui.components.WatchlistManagementDialog
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -171,6 +171,7 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
     var accountNumber by remember { mutableStateOf("") }
     var appKey by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
+    var isEditingKeys by remember { mutableStateOf(false) }
     
     // PIN States
     var newPinInput by remember { mutableStateOf("") }
@@ -189,14 +190,19 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
 
     // PIN Verification Dialog Trigger
     LaunchedEffect(accountData.pin) {
+        val savedPin = prefs.getString("SavedPin_stock_$currentUserId", "")
         if (accountData.pin.isNotEmpty() && !isPinVerified) {
-            showPinDialog = true
+            if (savedPin == accountData.pin) {
+                isPinVerified = true
+            } else {
+                showPinDialog = true
+            }
         } else {
             isPinVerified = true
         }
     }
 
-    LaunchedEffect(accountData, broker, isMock, isPinVerified) {
+    LaunchedEffect(accountData, broker, isMock, isOverseas, isPinVerified) {
         if (!isPinVerified) {
             accountNumber = ""
             appKey = ""
@@ -209,10 +215,12 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
             accountNumber = saved.account_number
             appKey = saved.app_key
             appSecret = saved.app_secret
+            isEditingKeys = false
         } else {
             accountNumber = ""
             appKey = ""
             appSecret = ""
+            isEditingKeys = true
         }
     }
 
@@ -330,27 +338,40 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
             }
         }
 
-        OutlinedTextField(
-            value = accountNumber,
-            onValueChange = { accountNumber = it },
-            label = { Text("계좌번호 (예: 12345678-01)") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-        )
+        if (!isEditingKeys) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("계좌 정보가 저장되어 있습니다.", color = androidx.compose.ui.graphics.Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { isEditingKeys = true }) {
+                    Text("계좌정보 수정")
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = accountNumber,
+                onValueChange = { accountNumber = it },
+                label = { Text("계좌번호 (예: 12345678-01)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
 
-        OutlinedTextField(
-            value = appKey,
-            onValueChange = { appKey = it },
-            label = { Text("App Key") },
-            modifier = Modifier.fillMaxWidth()
-        )
+            OutlinedTextField(
+                value = appKey,
+                onValueChange = { appKey = it },
+                label = { Text("App Key") },
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        OutlinedTextField(
-            value = appSecret,
-            onValueChange = { appSecret = it },
-            label = { Text("App Secret") },
-            modifier = Modifier.fillMaxWidth()
-        )
+            OutlinedTextField(
+                value = appSecret,
+                onValueChange = { appSecret = it },
+                label = { Text("App Secret") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -382,6 +403,7 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
     }
 
     if (showPinDialog) {
+        var savePinChecked by remember { mutableStateOf(false) }
         val onPinConfirm = {
             val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
             if (verifyPinInput == decryptedPin) {
@@ -389,6 +411,11 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                 showPinDialog = false
                 verifyPinInput = ""
                 prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
+                if (savePinChecked) {
+                    prefs.edit().putString("SavedPin_stock_$currentUserId", accountData.pin).apply()
+                } else {
+                    prefs.edit().remove("SavedPin_stock_$currentUserId").apply()
+                }
             } else {
                 Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
             }
@@ -400,15 +427,21 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
             },
             title = { Text("보안 계정 확인") },
             text = {
-                OutlinedTextField(
-                    value = verifyPinInput,
-                    onValueChange = { verifyPinInput = it },
-                    label = { Text("비밀번호") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
-                    visualTransformation = PasswordVisualTransformation()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = verifyPinInput,
+                        onValueChange = { verifyPinInput = it },
+                        label = { Text("비밀번호") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = savePinChecked, onCheckedChange = { savePinChecked = it })
+                        Text("비밀번호 기억하기")
+                    }
+                }
             },
             confirmButton = {
                 Button(onClick = onPinConfirm) { Text("확인") }
@@ -455,21 +488,25 @@ fun StockTradingScreen(
     val isMock = activeAcc?.is_mock ?: true
     val brokerName = activeAcc?.broker ?: "설정안됨"
     
-    var watchSymbolsInput by remember { mutableStateOf("") }
-    var previousIsOverseas by remember { mutableStateOf(isOverseas) }
-    
-    LaunchedEffect(isOverseas) {
-        if (previousIsOverseas != isOverseas) {
-            watchSymbolsInput = ""
-            viewModel.updateWatchSymbols("", "stock")
-            previousIsOverseas = isOverseas
-        }
-    }
-    
-    LaunchedEffect(settings.watch_symbols) {
-        if (watchSymbolsInput.isEmpty() && settings.watch_symbols.isNotEmpty()) {
-            watchSymbolsInput = settings.watch_symbols.keys.joinToString(",")
-        }
+    val suggestions = status.stock_names
+    var showWatchlistDialog by remember { mutableStateOf(false) }
+
+    if (showWatchlistDialog) {
+        val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.all { it.isDigit() } else sym.all { it.isDigit() } }
+        WatchlistManagementDialog(
+            initialSymbols = filteredWatchSymbols.entries.sortedBy { it.value.order }.map { (code, _) ->
+                val name = status.stock_names[code] ?: suggestions[code]
+                if (name != null) "$name ($code)" else code
+            },
+            isOverseas = isOverseas,
+            isCrypto = false,
+            suggestions = suggestions,
+            onDismiss = { showWatchlistDialog = false },
+            onSave = { managedList ->
+                viewModel.updateWatchSymbols(managedList, "stock", isOverseas)
+                showWatchlistDialog = false
+            }
+        )
     }
 
     val authError = status.authError
@@ -655,13 +692,14 @@ fun StockTradingScreen(
         )
     }
 
+    val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.all { it.isDigit() } else sym.all { it.isDigit() } }
+    val watchSymbolsList = filteredWatchSymbols.entries.sortedBy { it.value.order }.map { it.key }
+
     var showSurgeDialog by remember { mutableStateOf(false) }
 
     if (showSurgeDialog) {
         val surge = settings.surge_trading
         var surgeEnabled by remember { mutableStateOf(surge.enabled) }
-        
-        val watchSymbolsList = settings.watch_symbols.keys.toList()
         
         val timeWindows = remember { mutableStateMapOf<String, String>() }
         val surgePercents = remember { mutableStateMapOf<String, String>() }
@@ -707,7 +745,7 @@ fun StockTradingScreen(
                     }
                     
                     if (watchSymbolsList.isEmpty()) {
-                        Text("감시 중인 종목이 없습니다.\n먼저 관심 종목을 추가하고 저장해주세요.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text("관심 종목이 없습니다.\n먼저 관심 종목을 추가하고 저장해주세요.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                     } else {
                         var expandedSymbol by remember { mutableStateOf<String?>(null) }
                         
@@ -727,7 +765,19 @@ fun StockTradingScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                            val currentPrice = status.stock_prices[sym] ?: 0.0
+                                            if (currentPrice > 0) {
+                                                val priceStr = if (isOverseas) "$${String.format(java.util.Locale.US, "%.2f", currentPrice)}" else "₩${String.format(java.util.Locale.US, "%,.0f", currentPrice)}"
+                                                Text(priceStr, fontSize = 14.sp, color = Color.DarkGray)
+                                            } else {
+                                                Text("로딩중...", fontSize = 14.sp, color = Color.Gray)
+                                            }
+                                        }
                                         Text(if (isExpanded) "▼" else "▶", color = Color.Gray, fontSize = 12.sp)
                                     }
                                     
@@ -922,12 +972,13 @@ fun StockTradingScreen(
         }
 
         if (showHoldings) {
-            if (status.holding_stocks.isEmpty()) {
+            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 }
+            if (visibleHoldings.isEmpty()) {
                 item {
                     Text("보유 중인 종목이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
                 }
             } else {
-                items(status.holding_stocks.toList()) { (symbol, stock) ->
+                items(visibleHoldings.toList()) { (symbol, stock) ->
                     HoldingStockItem(
                         symbol = symbol, 
                         stock = stock, 
@@ -942,20 +993,12 @@ fun StockTradingScreen(
         }
 
         item {
-            OutlinedTextField(
-                value = watchSymbolsInput,
-                onValueChange = { watchSymbolsInput = it },
-                label = { Text(if (isOverseas) "해외 감시 종목 (예: AAPL, TSLA)" else "국내 감시 종목 (예: 005930, 035420)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { viewModel.updateWatchSymbols(watchSymbolsInput, "stock") }),
-                trailingIcon = {
-                    TextButton(onClick = { viewModel.updateWatchSymbols(watchSymbolsInput, "stock") }) {
-                        Text("저장")
-                    }
-                }
-            )
+            Button(
+                onClick = { showWatchlistDialog = true },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Text("관심 종목 관리")
+            }
         }
 
         item {
@@ -973,12 +1016,13 @@ fun StockTradingScreen(
         }
 
         if (showWatchList) {
-            if (status.stock_prices.isEmpty()) {
+            if (watchSymbolsList.isEmpty()) {
                 item {
-                    Text("감시 중인 종목이 없습니다.", color = Color.Gray)
+                    Text("관심 종목이 없습니다.", color = Color.Gray)
                 }
             } else {
-                items(status.stock_prices.toList()) { (symbol, price) ->
+                items(watchSymbolsList) { symbol ->
+                    val price = status.stock_prices[symbol] ?: 0.0
                     StockItem(
                         symbol = symbol,
                         name = status.stock_names[symbol] ?: symbol,
@@ -1025,7 +1069,7 @@ fun StockTradingScreen(
                         }
                         if (isSurgeStatusExpanded) {
                             activeSurge.forEach { (sym, cfgs) ->
-                                val name = status.stock_names[sym] ?: sym
+                                val name = status.stock_names[sym] ?: status.holding_stocks[sym]?.name?.ifEmpty { null } ?: sym
                                 cfgs.filter { it.buy_quantity > 0 }.forEach { cfg ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
@@ -1087,6 +1131,7 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
     // Crypto: broker is always 업비트, no mock/real, no overseas, no account number
     var appKey by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
+    var isEditingKeys by remember { mutableStateOf(false) }
     
     // PIN States
     var newPinInput by remember { mutableStateOf("") }
@@ -1096,8 +1141,13 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
 
     // PIN Verification Dialog Trigger
     LaunchedEffect(accountData.pin) {
+        val savedPin = prefs.getString("SavedPin_crypto_$currentUserId", "")
         if (accountData.pin.isNotEmpty() && !isPinVerified) {
-            showPinDialog = true
+            if (savedPin == accountData.pin) {
+                isPinVerified = true
+            } else {
+                showPinDialog = true
+            }
         } else {
             isPinVerified = true
         }
@@ -1114,9 +1164,11 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
         if (saved != null) {
             appKey = saved.app_key
             appSecret = saved.app_secret
+            isEditingKeys = false
         } else {
             appKey = ""
             appSecret = ""
+            isEditingKeys = true
         }
     }
 
@@ -1192,19 +1244,32 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
             modifier = Modifier.fillMaxWidth()
         )
 
-        OutlinedTextField(
-            value = appKey,
-            onValueChange = { appKey = it },
-            label = { Text("Access Key") },
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (!isEditingKeys) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("계좌 정보가 저장되어 있습니다.", color = androidx.compose.ui.graphics.Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { isEditingKeys = true }) {
+                    Text("계좌정보 수정")
+                }
+            }
+        } else {
+            OutlinedTextField(
+                value = appKey,
+                onValueChange = { appKey = it },
+                label = { Text("Access Key") },
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        OutlinedTextField(
-            value = appSecret,
-            onValueChange = { appSecret = it },
-            label = { Text("Secret Key") },
-            modifier = Modifier.fillMaxWidth()
-        )
+            OutlinedTextField(
+                value = appSecret,
+                onValueChange = { appSecret = it },
+                label = { Text("Secret Key") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -1236,6 +1301,7 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
     }
 
     if (showPinDialog) {
+        var savePinChecked by remember { mutableStateOf(false) }
         val onPinConfirm = {
             val decryptedPin = try { CryptoUtils.decrypt(accountData.pin) } catch(e: Exception) { accountData.pin }
             if (verifyPinInput == decryptedPin) {
@@ -1243,6 +1309,11 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
                 showPinDialog = false
                 verifyPinInput = ""
                 prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
+                if (savePinChecked) {
+                    prefs.edit().putString("SavedPin_crypto_$currentUserId", accountData.pin).apply()
+                } else {
+                    prefs.edit().remove("SavedPin_crypto_$currentUserId").apply()
+                }
             } else {
                 Toast.makeText(context, "PIN이 일치하지 않습니다.", Toast.LENGTH_SHORT).show()
             }
@@ -1254,15 +1325,21 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
             },
             title = { Text("보안 계정 확인") },
             text = {
-                OutlinedTextField(
-                    value = verifyPinInput,
-                    onValueChange = { verifyPinInput = it },
-                    label = { Text("비밀번호") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
-                    visualTransformation = PasswordVisualTransformation()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = verifyPinInput,
+                        onValueChange = { verifyPinInput = it },
+                        label = { Text("비밀번호") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onPinConfirm() }),
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = savePinChecked, onCheckedChange = { savePinChecked = it })
+                        Text("비밀번호 기억하기")
+                    }
+                }
             },
             confirmButton = {
                 Button(onClick = onPinConfirm) { Text("확인") }
@@ -1307,14 +1384,25 @@ fun CryptoTradingScreen(
     val activeAcc = accountData.saved_accounts[accountData.active_account_id]
     val brokerName = activeAcc?.broker ?: "설정안됨"
     
-    var watchSymbolsInput by remember { mutableStateOf("") }
-    
-    LaunchedEffect(settings.watch_symbols) {
-        if (watchSymbolsInput.isEmpty() && settings.watch_symbols.isNotEmpty()) {
-            watchSymbolsInput = settings.watch_symbols.keys.joinToString(",") { 
-                it.removePrefix("KRW-")
+    val suggestions = status.stock_names
+    var showWatchlistDialog by remember { mutableStateOf(false) }
+
+    if (showWatchlistDialog) {
+        WatchlistManagementDialog(
+            initialSymbols = settings.watch_symbols.entries.sortedBy { it.value.order }.map { (code, _) ->
+                val cleanCode = code.removePrefix("KRW-")
+                val name = status.stock_names[code] ?: suggestions[code] // Look up by full code (e.g. KRW-BTC)
+                if (name != null) "$name ($cleanCode)" else cleanCode
+            },
+            isOverseas = false,
+            isCrypto = true,
+            suggestions = suggestions,
+            onDismiss = { showWatchlistDialog = false },
+            onSave = { managedList ->
+                viewModel.updateWatchSymbols(managedList, "crypto")
+                showWatchlistDialog = false
             }
-        }
+        )
     }
 
     val authError = status.authError
@@ -1485,13 +1573,13 @@ fun CryptoTradingScreen(
         )
     }
 
+    val watchSymbolsList = settings.watch_symbols.entries.sortedBy { it.value.order }.map { it.key }
+
     var showSurgeDialog by remember { mutableStateOf(false) }
 
     if (showSurgeDialog) {
         val surge = settings.surge_trading
         var surgeEnabled by remember { mutableStateOf(surge.enabled) }
-        
-        val watchSymbolsList = settings.watch_symbols.keys.toList()
         
         val timeWindows = remember { mutableStateMapOf<String, String>() }
         val surgePercents = remember { mutableStateMapOf<String, String>() }
@@ -1537,7 +1625,7 @@ fun CryptoTradingScreen(
                     }
                     
                     if (watchSymbolsList.isEmpty()) {
-                        Text("감시 중인 코인이 없습니다.\n먼저 관심 코인을 추가하고 저장해주세요.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        Text("관심 코인이 없습니다.\n먼저 관심 코인을 추가하고 저장해주세요.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                     } else {
                         var expandedSymbol by remember { mutableStateOf<String?>(null) }
                         
@@ -1557,7 +1645,19 @@ fun CryptoTradingScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(name, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                            val currentPrice = status.stock_prices[sym] ?: 0.0
+                                            if (currentPrice > 0) {
+                                                val priceStr = "₩${String.format(java.util.Locale.US, "%,.0f", currentPrice)}"
+                                                Text(priceStr, fontSize = 14.sp, color = Color.DarkGray)
+                                            } else {
+                                                Text("로딩중...", fontSize = 14.sp, color = Color.Gray)
+                                            }
+                                        }
                                         Text(if (isExpanded) "▼" else "▶", color = Color.Gray, fontSize = 12.sp)
                                     }
                                     
@@ -1751,12 +1851,13 @@ fun CryptoTradingScreen(
         }
 
         if (showHoldings) {
-            if (status.holding_stocks.isEmpty()) {
+            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 && (it.value.current_price * it.value.quantity) > 100.0 }
+            if (visibleHoldings.isEmpty()) {
                 item {
                     Text("보유 중인 코인이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
                 }
             } else {
-                items(status.holding_stocks.toList()) { (symbol, stock) ->
+                items(visibleHoldings.toList()) { (symbol, stock) ->
                     HoldingStockItem(
                         symbol = symbol, 
                         stock = stock, 
@@ -1771,20 +1872,12 @@ fun CryptoTradingScreen(
         }
 
         item {
-            OutlinedTextField(
-                value = watchSymbolsInput,
-                onValueChange = { watchSymbolsInput = it },
-                label = { Text("코인 감시 종목 (예: BTC, ETH)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { viewModel.updateWatchSymbols(watchSymbolsInput, "crypto") }),
-                trailingIcon = {
-                    TextButton(onClick = { viewModel.updateWatchSymbols(watchSymbolsInput, "crypto") }) {
-                        Text("저장")
-                    }
-                }
-            )
+            Button(
+                onClick = { showWatchlistDialog = true },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Text("관심 종목 관리")
+            }
         }
 
         item {
@@ -1802,12 +1895,13 @@ fun CryptoTradingScreen(
         }
 
         if (showWatchList) {
-            if (status.stock_prices.isEmpty()) {
+            if (watchSymbolsList.isEmpty()) {
                 item {
-                    Text("감시 중인 코인이 없습니다.", color = Color.Gray)
+                    Text("관심 코인이 없습니다.", color = Color.Gray)
                 }
             } else {
-                items(status.stock_prices.toList()) { (symbol, price) ->
+                items(watchSymbolsList) { symbol ->
+                    val price = status.stock_prices[symbol] ?: 0.0
                     StockItem(
                         symbol = symbol,
                         name = status.stock_names[symbol] ?: symbol,
@@ -1854,7 +1948,7 @@ fun CryptoTradingScreen(
                         }
                         if (isSurgeStatusExpanded) {
                             activeSurge.forEach { (sym, cfgs) ->
-                                val name = status.stock_names[sym] ?: sym
+                                val name = status.stock_names[sym] ?: status.holding_stocks[sym]?.name?.ifEmpty { null } ?: sym
                                 cfgs.filter { it.buy_quantity > 0 }.forEach { cfg ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
@@ -1909,7 +2003,7 @@ fun HoldingStockItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = stock.name.ifEmpty { symbol }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(text = stock.name.ifEmpty { symbol }, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     if (isCrypto) {
                         Text(text = "${formatCryptoQuantity(stock.quantity)}개", style = MaterialTheme.typography.bodySmall)
                     } else {
@@ -1973,7 +2067,11 @@ fun StockItem(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                val priceStr = if (isOverseas) "$${String.format(Locale.US, "%.2f", price)}" else "₩${String.format(Locale.US, "%,.0f", price)}"
+                val priceStr = if (price > 0) {
+                    if (isOverseas) "$${String.format(Locale.US, "%.2f", price)}" else "₩${String.format(Locale.US, "%,.0f", price)}"
+                } else {
+                    "로딩중..."
+                }
                 Text(text = priceStr, style = MaterialTheme.typography.bodyMedium)
             }
             Button(

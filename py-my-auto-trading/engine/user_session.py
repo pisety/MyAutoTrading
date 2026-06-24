@@ -338,8 +338,11 @@ class UserSession:
                             
                 self._last_rest_price = now
                     
-                # Sync missing stock names
-                for sym in symbols:
+                # Sync missing stock names for watch list and surge configs
+                all_symbols_for_names = set(symbols)
+                if self.settings.surge_trading.enabled:
+                    all_symbols_for_names.update(self.settings.surge_trading.per_symbol_config.keys())
+                for sym in all_symbols_for_names:
                     if sym not in self.stock_names:
                         name = await self._fetch_stock_name(sym)
                         self.stock_names[sym] = name
@@ -421,7 +424,7 @@ class UserSession:
                 # Fallback if old data format is somehow loaded
                 configs = [configs]
                 
-            for sym_cfg in configs:
+            for i, sym_cfg in enumerate(configs):
                 if sym_cfg.buy_quantity <= 0: continue
                 
                 cutoff_ts = latest_ts - sym_cfg.time_window_seconds
@@ -439,12 +442,25 @@ class UserSession:
                     last_buy = self.last_surge_buy_time.get(sym, 0)
                     if time.time() - last_buy > 60: # 60s cooldown
                         logger.info(f"[{self.uid}] Surge detected on {sym} ({sym_cfg.time_window_seconds}s, {sym_cfg.surge_percent_threshold}%): {surge_pct:.2f}%. Triggering BUY order.")
-                        self._loop.create_task(self._execute_surge_buy(sym, sym_cfg.buy_quantity, latest_p, cfg.allow_extended_hours))
+                        self._loop.create_task(self._execute_surge_buy(sym, sym_cfg.buy_quantity, latest_p, cfg.allow_extended_hours, i))
                         # Only trigger once per symbol per cycle, break out of config loop to respect cooldown
                         break
 
-    async def _execute_surge_buy(self, symbol, qty, price, allow_extended):
+    async def _execute_surge_buy(self, symbol, qty, price, allow_extended, config_idx=None):
         success, _ = await self.broker.execute_order(symbol, "BUY", qty, price, allow_extended)
         if success:
             self.fb.send_push_notification(self.uid, "급등주 매수 체결", f"[{symbol}] BUY {qty} 주문이 체결되었습니다.")
             self.last_surge_buy_time[symbol] = time.time()
+            
+            if config_idx is not None:
+                cfg = self.settings.surge_trading
+                if symbol in cfg.per_symbol_config:
+                    configs = cfg.per_symbol_config[symbol]
+                    if 0 <= config_idx < len(configs):
+                        del configs[config_idx]
+                        dumped = [c.dict() for c in configs]
+                        self.fb.set_data(f"{self.base_path}/settings/surge_trading/per_symbol_config/{symbol}", dumped)
+                        
+            # Wait a bit before checking balance to allow exchange to process the order
+            await asyncio.sleep(2.0)
+            self._last_balance_check = 0.0

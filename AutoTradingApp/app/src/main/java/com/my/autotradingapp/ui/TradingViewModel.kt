@@ -45,6 +45,16 @@ class TradingViewModel : ViewModel() {
     private val _manualOrderStatus = MutableStateFlow<ManualOrder?>(null)
     val manualOrderStatus = _manualOrderStatus.asStateFlow()
 
+    // Market data for autocomplete
+    private val _domesticStocks = MutableStateFlow<Map<String, String>>(emptyMap())
+    val domesticStocks = _domesticStocks.asStateFlow()
+
+    private val _upbitCoins = MutableStateFlow<Map<String, String>>(emptyMap())
+    val upbitCoins = _upbitCoins.asStateFlow()
+
+    private val _overseasStocks = MutableStateFlow<Map<String, String>>(emptyMap())
+    val overseasStocks = _overseasStocks.asStateFlow()
+
     // Listeners for stock
     private var stockStatusListener: ValueEventListener? = null
     private var stockSettingsListener: ValueEventListener? = null
@@ -59,6 +69,7 @@ class TradingViewModel : ViewModel() {
 
     init {
         startListening(_userId.value)
+        loadMarketData()
     }
 
     private fun getUserPath(id: String): String {
@@ -204,6 +215,10 @@ class TradingViewModel : ViewModel() {
             snapshot.child("stock_names").children.forEach { child ->
                 val key = child.key ?: return@forEach
                 val value = child.value as? String ?: ""
+                // Filter out corrupted keys inserted by old versions (e.g. KRW-KRW-BTC or Korean characters)
+                if (key.contains("KRW-KRW-") || key.matches(Regex(".*[가-힣]+.*"))) {
+                    return@forEach
+                }
                 stockNames[key] = value
             }
 
@@ -236,12 +251,14 @@ class TradingViewModel : ViewModel() {
         val isAutoTrading = snapshot.child("is_auto_trading").value as? Boolean ?: false
         val memo = snapshot.child("memo").value as? String ?: ""
         
-        val watchSymbols = mutableMapOf<String, SymbolSettings>()
+        val watchSymbolsRaw = mutableMapOf<String, SymbolSettings>()
         snapshot.child("watch_symbols").children.forEach { child ->
             val key = child.key ?: return@forEach
             val enabled = child.child("enabled").value as? Boolean ?: true
-            watchSymbols[key] = SymbolSettings(enabled)
+            val order = (child.child("order").value as? Long)?.toInt() ?: 0
+            watchSymbolsRaw[key] = SymbolSettings(enabled, order)
         }
+        val watchSymbols = watchSymbolsRaw.entries.sortedBy { it.value.order }.associate { it.key to it.value }
         
         val surgeNode = snapshot.child("surge_trading")
         val surgeEnabled = surgeNode.child("enabled").value as? Boolean ?: false
@@ -403,6 +420,62 @@ class TradingViewModel : ViewModel() {
         }
     }
 
+    private fun loadMarketData() {
+        database.reference.child("market_data").child("domestic_stocks")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val map = mutableMapOf<String, String>()
+                    for (child in snapshot.children) {
+                        val key = child.key
+                        val value = child.getValue(String::class.java)
+                        if (key != null && value != null) {
+                            map[key] = value
+                        }
+                    }
+                    _domesticStocks.value = map
+                }
+                override fun onCancelled(error: DatabaseError) {
+                    Log.e("TradingViewModel", "Failed to load domestic stocks", error.toException())
+                }
+            })
+
+        database.reference.child("market_data").child("upbit_coins")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val map = mutableMapOf<String, String>()
+                    for (child in snapshot.children) {
+                        val key = child.key
+                        val value = child.getValue(String::class.java)
+                        if (key != null && value != null) {
+                            map[key] = value
+                        }
+                    }
+                    _upbitCoins.value = map
+                }
+                override fun onCancelled(error: DatabaseError) {
+                    Log.e("TradingViewModel", "Failed to load upbit coins", error.toException())
+                }
+            })
+
+        database.reference.child("market_data").child("overseas_stocks")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val map = mutableMapOf<String, String>()
+                    for (child in snapshot.children) {
+                        val key = child.key
+                        val value = child.getValue(String::class.java)
+                        if (key != null && value != null) {
+                            map[key] = value
+                        }
+                    }
+                    _overseasStocks.value = map
+                }
+                override fun onCancelled(error: DatabaseError) {
+                    Log.e("TradingViewModel", "Failed to load overseas stocks", error.toException())
+                }
+            })
+    }
+
     fun saveAccount(info: AccountInfo, serviceType: String) {
         val id = _userId.value
         val servicePath = getServicePath(id, serviceType)
@@ -447,14 +520,41 @@ class TradingViewModel : ViewModel() {
         database.getReference("$servicePath/settings/is_auto_trading").setValue(enabled)
     }
 
-    fun updateWatchSymbols(symbolsStr: String, serviceType: String) {
+    fun updateWatchSymbols(symbols: List<String>, serviceType: String, isOverseas: Boolean? = null) {
         val servicePath = getServicePath(_userId.value, serviceType)
-        val symbolsMap = symbolsStr.split(",").filter { it.isNotBlank() }.associate { 
-            var sym = it.trim().uppercase()
+        val symbolsMap = mutableMapOf<String, SymbolSettings>()
+        var index = 0
+        
+        if (serviceType == "stock" && isOverseas != null) {
+            val currentSymbols = _stockSettings.value.watch_symbols.keys
+            val otherMarketSymbols = currentSymbols.filter { sym ->
+                if (isOverseas) sym.all { it.isDigit() } else !sym.all { it.isDigit() }
+            }
+            otherMarketSymbols.forEach { sym ->
+                symbolsMap[sym] = SymbolSettings(true, index++)
+            }
+        }
+
+        val stockNamesPath = "$servicePath/status/stock_names"
+
+        symbols.forEach { symbolStr -> 
+            val str = symbolStr.trim()
+            var sym = str
+            var name = ""
+            if (str.contains("(") && str.endsWith(")")) {
+                name = str.substringBeforeLast("(").trim()
+                sym = str.substringAfterLast("(").removeSuffix(")")
+            }
+            sym = sym.uppercase()
             if (serviceType == "crypto" && !sym.contains("-")) {
                 sym = "KRW-$sym"
             }
-            sym to SymbolSettings(true)
+            symbolsMap[sym] = SymbolSettings(true, index++)
+            
+            // 이름이 있는 경우 UI 지연을 없애기 위해 Firebase에 즉시 이름 저장
+            if (name.isNotEmpty()) {
+                database.getReference(stockNamesPath).child(sym).setValue(name)
+            }
         }
         database.getReference("$servicePath/settings/watch_symbols").setValue(symbolsMap)
     }

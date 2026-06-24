@@ -69,7 +69,8 @@ data class TradingSettings(
 
 @IgnoreExtraProperties
 data class SymbolSettings(
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val order: Int = 0
 )
 
 @IgnoreExtraProperties
