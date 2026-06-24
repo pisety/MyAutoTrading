@@ -1070,12 +1070,17 @@ fun StockTradingScreen(
                         if (isSurgeStatusExpanded) {
                             activeSurge.forEach { (sym, cfgs) ->
                                 val name = status.stock_names[sym] ?: status.holding_stocks[sym]?.name?.ifEmpty { null } ?: sym
+                                val currentPrice = status.stock_prices[sym] ?: 0.0
+                                val priceStr = if (currentPrice > 0) {
+                                    if (isOverseas) "$${String.format(java.util.Locale.US, "%.2f", currentPrice)}" else "₩${String.format(java.util.Locale.US, "%,.0f", currentPrice)}"
+                                } else "로딩중..."
+
                                 cfgs.filter { it.buy_quantity > 0 }.forEach { cfg ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text(name)
+                                        Text("$name ($priceStr)")
                                         Text("${cfg.time_window_seconds}초 / ${cfg.surge_percent_threshold}% / ${cfg.buy_quantity}주", fontWeight = FontWeight.Bold)
                                     }
                                 }
@@ -1949,12 +1954,17 @@ fun CryptoTradingScreen(
                         if (isSurgeStatusExpanded) {
                             activeSurge.forEach { (sym, cfgs) ->
                                 val name = status.stock_names[sym] ?: status.holding_stocks[sym]?.name?.ifEmpty { null } ?: sym
+                                val currentPrice = status.stock_prices[sym] ?: 0.0
+                                val priceStr = if (currentPrice > 0) {
+                                    "₩${String.format(java.util.Locale.US, "%,.0f", currentPrice)}"
+                                } else "로딩중..."
+
                                 cfgs.filter { it.buy_quantity > 0 }.forEach { cfg ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text(name)
+                                        Text("$name ($priceStr)")
                                         Text("${cfg.time_window_seconds}초 / ${cfg.surge_percent_threshold}% / ${cfg.buy_quantity}개", fontWeight = FontWeight.Bold)
                                     }
                                 }
