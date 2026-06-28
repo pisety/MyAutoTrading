@@ -1,4 +1,4 @@
-package com.my.autotradingapp.data
+﻿package com.my.autotradingapp.data
 
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.database.PropertyName
@@ -123,5 +123,10 @@ data class LaoreStatus(
     val current_round: Int = 0,
     val holding_quantity: Double = 0.0,
     val average_price: Double = 0.0,
-    val status_message: String = ""
+    val status_message: String = "",
+    val current_mode: String = "일반 모드(전반전)",
+    val t_value: Double = 0.0,
+    val target_sell_price: Double = 0.0,
+    val remaining_cash: Double = 0.0
 )
+

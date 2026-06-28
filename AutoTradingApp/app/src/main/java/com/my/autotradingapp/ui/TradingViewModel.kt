@@ -278,13 +278,17 @@ class TradingViewModel : ViewModel() {
         )
     }
 
-    private fun parseLaoreStatus(snapshot: DataSnapshot): LaoreStatus {
+        private fun parseLaoreStatus(snapshot: DataSnapshot): LaoreStatus {
         if (!snapshot.exists()) return LaoreStatus()
         return LaoreStatus(
             current_round = (snapshot.child("current_round").value as? Number)?.toInt() ?: 0,
             holding_quantity = (snapshot.child("holding_quantity").value as? Number)?.toDouble() ?: 0.0,
             average_price = (snapshot.child("average_price").value as? Number)?.toDouble() ?: 0.0,
-            status_message = snapshot.child("status_message").value as? String ?: ""
+            status_message = snapshot.child("status_message").value as? String ?: "",
+            current_mode = snapshot.child("current_mode").value as? String ?: "일반 모드(전반전)",
+            t_value = (snapshot.child("t_value").value as? Number)?.toDouble() ?: 0.0,
+            target_sell_price = (snapshot.child("target_sell_price").value as? Number)?.toDouble() ?: 0.0,
+            remaining_cash = (snapshot.child("remaining_cash").value as? Number)?.toDouble() ?: 0.0
         )
     }
 
@@ -647,6 +651,7 @@ class TradingViewModel : ViewModel() {
         stopListening()
     }
 }
+
 
 
 

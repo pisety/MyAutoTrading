@@ -1,4 +1,4 @@
-﻿package com.my.autotradingapp
+package com.my.autotradingapp
 
 import android.os.Bundle
 import android.widget.Toast
@@ -2157,8 +2157,12 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("진행 현황", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
                     Text("현재 회차: ${status.current_round} / ${settings.split_count}")
+                    Text("진행 모드: ${status.current_mode}")
+                    Text("T값 (진행도): ${String.format("%.2f", status.t_value)}")
                     Text("보유 수량: ${status.holding_quantity}주")
                     Text("평균 단가: ${status.average_price}")
+                    Text("목표 별지점(매도가): ${status.target_sell_price}")
+                    Text("잔여 현금(Pool): ${String.format("%,.0f", status.remaining_cash)}")
                     if (status.status_message.isNotEmpty()) {
                         Text("상태: ${status.status_message}", color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
                     }
