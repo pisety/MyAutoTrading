@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import json
 import logging
@@ -183,7 +183,7 @@ class KISBroker(BaseBroker):
             logger.error(f"Balance check error: {e}")
             return None, None, None
 
-    async def execute_order(self, symbol: str, side: str, qty: float, price: float, allow_extended_hours: bool) -> Tuple[bool, str]:
+    async def execute_order(self, symbol: str, side: str, qty: float, price: float, allow_extended_hours: bool = False, ord_dvsn: str = None) -> Tuple[bool, str]:
         if not await self.ensure_valid_token():
             return False, "KIS 인증 토큰 발급 실패"
 
@@ -205,7 +205,7 @@ class KISBroker(BaseBroker):
         }
 
         # 스마트 롤링 로직: 정규장(00) -> 프리장(34) -> 애프터(32) -> 데이마켓(33)
-        divisions = ["00", "34", "32", "33"] if allow_extended_hours else ["00"]
+        divisions = [ord_dvsn] if ord_dvsn else (["00", "34", "32", "33"] if allow_extended_hours else ["00"])
         last_error = "주문 실패"
 
         try:
@@ -463,3 +463,4 @@ class KISBroker(BaseBroker):
             await self.ws_connection.close()
         if self.ws_task:
             self.ws_task.cancel()
+

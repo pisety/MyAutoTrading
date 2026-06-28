@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 echo ===================================================
 echo   Oracle Cloud Backend Auto Deployment Script
 echo ===================================================
@@ -25,4 +25,5 @@ echo.
 echo ===================================================
 echo   Deployment completed successfully!
 echo ===================================================
-pause
+
+

@@ -1,4 +1,4 @@
-import time
+﻿import time
 import asyncio
 import logging
 import aiohttp
@@ -352,6 +352,8 @@ class UserSession:
                 await self._check_stop_loss()
                 await self._check_surge_trading()
 
+                await self._check_laore_orders()
+
             await asyncio.sleep(0.5)
 
     async def _check_conditional_orders(self):
@@ -464,3 +466,53 @@ class UserSession:
             # Wait a bit before checking balance to allow exchange to process the order
             await asyncio.sleep(2.0)
             self._last_balance_check = 0.0
+
+    async def _check_laore_orders(self):
+        from engine.laore_calculator import calculate_daily_orders
+        
+        laore_settings = self.fb.get_data(f"{self.base_path}/laore_settings") or {}
+        if not laore_settings.get("enabled", False): return
+        
+        laore_status = self.fb.get_data(f"{self.base_path}/laore_status") or {}
+        
+        # 썸머타임 체크
+        from datetime import datetime
+        import pytz
+        ny_tz = pytz.timezone('America/New_York')
+        now_ny = datetime.now(pytz.utc).astimezone(ny_tz)
+        is_summer = now_ny.dst() != type(now_ny.dst())(0)
+        
+        kst = pytz.timezone('Asia/Seoul')
+        now_kst = datetime.now(pytz.utc).astimezone(kst)
+        target_hour = 17 if is_summer else 18
+        target_min = 40
+        
+        last_exec_date = laore_status.get("last_exec_date", "")
+        current_date_str = now_kst.strftime("%Y-%m-%d")
+        
+        if now_kst.hour == target_hour and now_kst.minute >= target_min and last_exec_date != current_date_str:
+            target_symbol = laore_settings.get("target_symbol")
+            if not target_symbol: return
+            
+            # Get latest price
+            prices = await self.broker.fetch_rest_current_prices([target_symbol])
+            current_price = prices.get(target_symbol)
+            if not current_price: return
+            
+            orders = calculate_daily_orders(laore_settings, laore_status, current_price)
+            
+            for buy_ord in orders['buy']:
+                await self.broker.execute_order(target_symbol, "BUY", buy_ord['qty'], buy_ord['price'], False, ord_dvsn="34")
+                import asyncio
+                await asyncio.sleep(0.3)
+                
+            for sell_ord in orders['sell']:
+                await self.broker.execute_order(target_symbol, "SELL", sell_ord['qty'], sell_ord['price'], False, ord_dvsn="34")
+                import asyncio
+                await asyncio.sleep(0.3)
+                
+            laore_status["current_round"] = laore_status.get("current_round", 0) + 1
+            laore_status["t_value"] = laore_status.get("t_value", 0.0) + 1.0
+            laore_status["last_exec_date"] = current_date_str
+            self.fb.set_data(f"{self.base_path}/laore_status", laore_status)
+
