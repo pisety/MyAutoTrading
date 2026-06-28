@@ -1,4 +1,4 @@
-package com.my.autotradingapp
+﻿package com.my.autotradingapp
 
 import android.os.Bundle
 import android.widget.Toast
@@ -35,6 +35,7 @@ import com.my.autotradingapp.data.AccountInfo
 import com.my.autotradingapp.data.HoldingStock
 import com.my.autotradingapp.data.SurgeTradingConfig
 import com.my.autotradingapp.data.SymbolSurgeConfig
+import com.my.autotradingapp.data.LaoreSettings
 import com.my.autotradingapp.ui.TradingViewModel
 import com.my.autotradingapp.ui.theme.AutoTradingAppTheme
 import com.my.autotradingapp.utils.CryptoUtils
@@ -62,7 +63,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainContent(viewModel: TradingViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("주식", "코인")
+    val tabs = listOf("주식", "코인", "라오어 무한매수")
     
     val currentUserId by viewModel.userId.collectAsState()
     val context = LocalContext.current
@@ -121,6 +122,7 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             when (selectedTab) {
                 0 -> StockTabContent(viewModel)
                 1 -> CryptoTabContent(viewModel)
+                2 -> LaoreTabContent(viewModel)
             }
         }
     }
@@ -2126,3 +2128,99 @@ fun Modifier.mouseScroll(state: LazyListState): Modifier = composed {
         }
     }
 }
+
+
+
+
+// ==================== LAORE TAB ====================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LaoreTabContent(viewModel: TradingViewModel) {
+    val settings by viewModel.laoreSettings.collectAsState()
+    val status by viewModel.laoreStatus.collectAsState()
+    
+    var enabled by remember(settings) { mutableStateOf(settings.enabled) }
+    var targetSymbol by remember(settings) { mutableStateOf(settings.target_symbol) }
+    var totalBudget by remember(settings) { mutableStateOf(settings.total_budget.toString()) }
+    var splitCount by remember(settings) { mutableStateOf(settings.split_count.toString()) }
+    var targetYield by remember(settings) { mutableStateOf(settings.target_yield_percent.toString()) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        contentPadding = PaddingValues(bottom = 80.dp)
+    ) {
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("진행 현황", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("현재 회차: ${status.current_round} / ${settings.split_count}")
+                    Text("보유 수량: ${status.holding_quantity}주")
+                    Text("평균 단가: ${status.average_price}")
+                    if (status.status_message.isNotEmpty()) {
+                        Text("상태: ${status.status_message}", color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+        }
+
+        item {
+            Text("무한매수법 설정", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
+            
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                Text("자동매매 가동", modifier = Modifier.weight(1f))
+                Switch(checked = enabled, onCheckedChange = { enabled = it })
+            }
+
+            OutlinedTextField(
+                value = targetSymbol,
+                onValueChange = { targetSymbol = it },
+                label = { Text("대상 종목 코드 (예: TQQQ)") },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+
+            OutlinedTextField(
+                value = totalBudget,
+                onValueChange = { totalBudget = it },
+                label = { Text("총 투자 원금 (KRW/USD)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+
+            OutlinedTextField(
+                value = splitCount,
+                onValueChange = { splitCount = it },
+                label = { Text("분할 횟수 (기본 40)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+
+            OutlinedTextField(
+                value = targetYield,
+                onValueChange = { targetYield = it },
+                label = { Text("목표 수익률 (%) (기본 10)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            )
+
+            Button(
+                onClick = {
+                    val newSettings = LaoreSettings(
+                        enabled = enabled,
+                        target_symbol = targetSymbol,
+                        total_budget = totalBudget.toDoubleOrNull() ?: 0.0,
+                        split_count = splitCount.toIntOrNull() ?: 40,
+                        target_yield_percent = targetYield.toFloatOrNull() ?: 10.0f
+                    )
+                    viewModel.saveLaoreSettings(newSettings)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("설정 저장")
+            }
+        }
+    }
+}
+

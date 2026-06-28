@@ -1,4 +1,4 @@
-package com.my.autotradingapp.ui
+﻿package com.my.autotradingapp.ui
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -28,6 +28,12 @@ class TradingViewModel : ViewModel() {
 
     private val _stockSettings = MutableStateFlow(TradingSettings())
     val stockSettings = _stockSettings.asStateFlow()
+
+    private val _laoreSettings = MutableStateFlow(LaoreSettings())
+    val laoreSettings = _laoreSettings.asStateFlow()
+
+    private val _laoreStatus = MutableStateFlow(LaoreStatus())
+    val laoreStatus = _laoreStatus.asStateFlow()
 
     private val _stockAccountData = MutableStateFlow(UserAccountData())
     val stockAccountData = _stockAccountData.asStateFlow()
@@ -66,6 +72,8 @@ class TradingViewModel : ViewModel() {
     private var cryptoSettingsListener: ValueEventListener? = null
     private var cryptoAccountListener: ValueEventListener? = null
     private var cryptoOrderListener: ValueEventListener? = null
+    private var laoreSettingsListener: ValueEventListener? = null
+    private var laoreStatusListener: ValueEventListener? = null
 
     init {
         startListening(_userId.value)
@@ -125,6 +133,21 @@ class TradingViewModel : ViewModel() {
         stockOrderListener = database.getReference("$stockPath/manual_orders").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 parseOrderStatus(snapshot)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+
+                // ============ LAORE LISTENERS ============
+        laoreSettingsListener = database.getReference("$stockPath/laore_settings").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _laoreSettings.value = parseLaoreSettings(snapshot)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+
+        laoreStatusListener = database.getReference("$stockPath/laore_status").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _laoreStatus.value = parseLaoreStatus(snapshot)
             }
             override fun onCancelled(error: DatabaseError) {}
         })
@@ -244,6 +267,33 @@ class TradingViewModel : ViewModel() {
         }
     }
 
+        private fun parseLaoreSettings(snapshot: DataSnapshot): LaoreSettings {
+        if (!snapshot.exists()) return LaoreSettings()
+        return LaoreSettings(
+            enabled = snapshot.child("enabled").value as? Boolean ?: false,
+            target_symbol = snapshot.child("target_symbol").value as? String ?: "",
+            total_budget = (snapshot.child("total_budget").value as? Number)?.toDouble() ?: 0.0,
+            split_count = (snapshot.child("split_count").value as? Number)?.toInt() ?: 40,
+            target_yield_percent = (snapshot.child("target_yield_percent").value as? Number)?.toFloat() ?: 10.0f
+        )
+    }
+
+    private fun parseLaoreStatus(snapshot: DataSnapshot): LaoreStatus {
+        if (!snapshot.exists()) return LaoreStatus()
+        return LaoreStatus(
+            current_round = (snapshot.child("current_round").value as? Number)?.toInt() ?: 0,
+            holding_quantity = (snapshot.child("holding_quantity").value as? Number)?.toDouble() ?: 0.0,
+            average_price = (snapshot.child("average_price").value as? Number)?.toDouble() ?: 0.0,
+            status_message = snapshot.child("status_message").value as? String ?: ""
+        )
+    }
+
+    fun saveLaoreSettings(settings: LaoreSettings) {
+        val id = _userId.value.trim()
+        if (id.isEmpty()) return
+        database.getReference("users/$id/stock/laore_settings").setValue(settings)
+    }
+
     private fun parseSettings(snapshot: DataSnapshot): TradingSettings {
         if (!snapshot.exists()) {
             return TradingSettings()
@@ -320,6 +370,8 @@ class TradingViewModel : ViewModel() {
         stockSettingsListener?.let { database.getReference("$stockPath/settings").removeEventListener(it) }
         stockAccountListener?.let { database.getReference("$stockPath/account_data").removeEventListener(it) }
         stockOrderListener?.let { database.getReference("$stockPath/manual_orders").removeEventListener(it) }
+        laoreSettingsListener?.let { database.getReference("$stockPath/laore_settings").removeEventListener(it) }
+        laoreStatusListener?.let { database.getReference("$stockPath/laore_status").removeEventListener(it) }
 
         cryptoStatusListener?.let { database.getReference("$cryptoPath/status").removeEventListener(it) }
         cryptoSettingsListener?.let { database.getReference("$cryptoPath/settings").removeEventListener(it) }
@@ -595,3 +647,8 @@ class TradingViewModel : ViewModel() {
         stopListening()
     }
 }
+
+
+
+
+

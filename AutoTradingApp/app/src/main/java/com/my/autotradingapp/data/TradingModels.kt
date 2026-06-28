@@ -108,3 +108,20 @@ data class StopLossOrder(
     val executed_at: String = "",
     val executed_price: Double = 0.0
 )
+
+@IgnoreExtraProperties
+data class LaoreSettings(
+    val enabled: Boolean = false,
+    val target_symbol: String = "",
+    val total_budget: Double = 0.0,
+    val split_count: Int = 40,
+    val target_yield_percent: Float = 10.0f
+)
+
+@IgnoreExtraProperties
+data class LaoreStatus(
+    val current_round: Int = 0,
+    val holding_quantity: Double = 0.0,
+    val average_price: Double = 0.0,
+    val status_message: String = ""
+)
