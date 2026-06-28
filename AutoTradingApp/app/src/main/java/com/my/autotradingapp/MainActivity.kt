@@ -2136,6 +2136,16 @@ fun Modifier.mouseScroll(state: LazyListState): Modifier = composed {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LaoreTabContent(viewModel: TradingViewModel) {
+    var showAccountSetup by remember { mutableStateOf(false) }
+    
+    if (showAccountSetup) {
+        StockAccountSetupScreen(
+            onDismiss = { showAccountSetup = false },
+            viewModel = viewModel
+        )
+        return
+    }
+
     val settings by viewModel.laoreSettings.collectAsState()
     val status by viewModel.laoreStatus.collectAsState()
     
@@ -2149,6 +2159,17 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         contentPadding = PaddingValues(bottom = 80.dp)
     ) {
+        item {
+            // Settings button row
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                OutlinedButton(onClick = { showAccountSetup = true }) {
+                    Text("⚙ 계좌 설정")
+                }
+            }
+        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
