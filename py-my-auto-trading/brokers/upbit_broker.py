@@ -188,8 +188,11 @@ class UpbitBroker(BaseBroker):
                                         data = await single_res.json()
                                         if data and len(data) > 0:
                                             prices[data[0]["market"]] = float(data[0]["trade_price"])
+                                    else:
+                                        logger.debug(f"Skip market {m}: HTTP {single_res.status}")
                             except Exception as ex:
                                 logger.debug(f"Skip market {m}: {ex}")
+                            await asyncio.sleep(0.15)
                         return prices
                     else:
                         logger.warning(f"Upbit ticker error ({res.status}): {await res.text()}")
