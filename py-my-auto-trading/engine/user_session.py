@@ -1,4 +1,4 @@
-﻿import time
+import time
 import asyncio
 import logging
 import aiohttp
@@ -268,7 +268,8 @@ class UserSession:
             async with aiohttp.ClientSession() as session:
                 url = f"https://finance.naver.com/item/main.naver?code={symbol.strip()}"
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as res:
-                    text = await res.text()
+                    raw_bytes = await res.read()
+                    text = raw_bytes.decode('euc-kr', errors='replace')
                     match = re.search(r'<title>(.*?)\s*:\s*(?:네이버|Npay)', text)
                     if match:
                         return match.group(1).strip()

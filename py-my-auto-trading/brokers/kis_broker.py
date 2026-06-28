@@ -1,4 +1,4 @@
-﻿import os
+import os
 import time
 import json
 import logging
@@ -176,7 +176,9 @@ class KISBroker(BaseBroker):
                             avail_cash = float(summary.get("frcr_drwg_psbl_amt_1", summary.get("frcr_use_psbl_amt", 0)))
                         else:
                             held_value = float(summary.get("tot_evlu_amt", summary.get("scts_evlu_amt", 0)))
-                            avail_cash = float(summary.get("dnca_tot_amt", summary.get("prvs_rcdl_excc_amt", 0)))
+                            avail_cash = float(summary.get("dnca_tot_amt", 0))
+                            if avail_cash == 0:
+                                avail_cash = float(summary.get("prvs_rcdl_excc_amt", 0))
                             
                     return (held_value + avail_cash), yield_rate, holdings
         except Exception as e:
