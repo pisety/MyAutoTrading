@@ -972,7 +972,8 @@ fun StockTradingScreen(
         }
 
         if (showHoldings) {
-            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 }
+            val threshold = if (isOverseas) 0.5 else 500.0
+            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 && (it.value.current_price * it.value.quantity) > threshold }
             if (visibleHoldings.isEmpty()) {
                 item {
                     Text("보유 중인 종목이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
@@ -1856,7 +1857,7 @@ fun CryptoTradingScreen(
         }
 
         if (showHoldings) {
-            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 && (it.value.current_price * it.value.quantity) > 100.0 }
+            val visibleHoldings = status.holding_stocks.filter { it.value.current_price > 0.0 && (it.value.current_price * it.value.quantity) > 500.0 }
             if (visibleHoldings.isEmpty()) {
                 item {
                     Text("보유 중인 코인이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
@@ -2035,6 +2036,15 @@ fun HoldingStockItem(
                         color = if (stock.yield >= 0) Color(0xFFD32F2F) else Color(0xFF1976D2),
                         style = MaterialTheme.typography.labelMedium
                     )
+                    val evalAmount = stock.current_price * stock.quantity
+                    val evalStr = if (isCrypto) {
+                        "₩${String.format(Locale.US, "%,.0f", evalAmount)}"
+                    } else if (isOverseas) {
+                        "$${String.format(Locale.US, "%.2f", evalAmount)}"
+                    } else {
+                        "₩${String.format(Locale.US, "%,.0f", evalAmount)}"
+                    }
+                    Text(text = evalStr, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
