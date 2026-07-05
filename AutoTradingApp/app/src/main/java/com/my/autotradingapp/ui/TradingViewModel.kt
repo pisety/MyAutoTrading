@@ -1,4 +1,4 @@
-﻿package com.my.autotradingapp.ui
+package com.my.autotradingapp.ui
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -29,10 +29,10 @@ class TradingViewModel : ViewModel() {
     private val _stockSettings = MutableStateFlow(TradingSettings())
     val stockSettings = _stockSettings.asStateFlow()
 
-    private val _laoreSettings = MutableStateFlow(LaoreSettings())
+    private val _laoreSettings = MutableStateFlow<Map<String, LaoreSettings>>(emptyMap())
     val laoreSettings = _laoreSettings.asStateFlow()
 
-    private val _laoreStatus = MutableStateFlow(LaoreStatus())
+    private val _laoreStatus = MutableStateFlow<Map<String, LaoreStatus>>(emptyMap())
     val laoreStatus = _laoreStatus.asStateFlow()
 
     private val _stockAccountData = MutableStateFlow(UserAccountData())
@@ -75,6 +75,19 @@ class TradingViewModel : ViewModel() {
     private var laoreSettingsListener: ValueEventListener? = null
     private var laoreStatusListener: ValueEventListener? = null
 
+    private var stockActiveAccountId = ""
+    private var cryptoActiveAccountId = ""
+
+    private var stockStatusRef: com.google.firebase.database.DatabaseReference? = null
+    private var stockSettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var stockOrderRef: com.google.firebase.database.DatabaseReference? = null
+    private var laoreSettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var laoreStatusRef: com.google.firebase.database.DatabaseReference? = null
+
+    private var cryptoStatusRef: com.google.firebase.database.DatabaseReference? = null
+    private var cryptoSettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var cryptoOrderRef: com.google.firebase.database.DatabaseReference? = null
+
     init {
         startListening(_userId.value)
         loadMarketData()
@@ -83,6 +96,12 @@ class TradingViewModel : ViewModel() {
     private fun getUserPath(id: String): String {
         val cleanId = id.trim()
         return "users/$cleanId"
+    }
+
+    private fun getAccountPath(id: String, serviceType: String): String {
+        val servicePath = getServicePath(id, serviceType)
+        val activeId = if (serviceType == "crypto") cryptoActiveAccountId else stockActiveAccountId
+        return if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
     }
 
     private fun getServicePath(id: String, serviceType: String): String {
@@ -106,82 +125,145 @@ class TradingViewModel : ViewModel() {
         val cryptoPath = getServicePath(id, "crypto")
         Log.d("TradingApp", "Start listening to paths: $stockPath, $cryptoPath")
         
-        // ============ STOCK LISTENERS ============
         stockAccountListener = database.getReference("$stockPath/account_data").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                val newActiveId = snapshot.child("active_account_id").value as? String ?: ""
+                val changed = stockActiveAccountId != newActiveId
+                
                 _stockAccountData.value = parseAccountData(snapshot, stockPath)
+                
+                if (changed) {
+                    stockActiveAccountId = newActiveId
+                    restartStockAccountSpecificListeners(stockPath, newActiveId)
+                }
             }
             override fun onCancelled(error: DatabaseError) {
                 Log.e("TradingApp", "Stock Account Listener Cancelled: ${error.message}")
             }
         })
 
-        stockStatusListener = database.getReference("$stockPath/status").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _stockStatus.value = parseStatus(snapshot, stockPath)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
-        stockSettingsListener = database.getReference("$stockPath/settings").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _stockSettings.value = parseSettings(snapshot)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
-        stockOrderListener = database.getReference("$stockPath/manual_orders").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                parseOrderStatus(snapshot)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
-                // ============ LAORE LISTENERS ============
-        laoreSettingsListener = database.getReference("$stockPath/laore_settings").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _laoreSettings.value = parseLaoreSettings(snapshot)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
-        laoreStatusListener = database.getReference("$stockPath/laore_status").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _laoreStatus.value = parseLaoreStatus(snapshot)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
-        // ============ CRYPTO LISTENERS ============
         cryptoAccountListener = database.getReference("$cryptoPath/account_data").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                val newActiveId = snapshot.child("active_account_id").value as? String ?: ""
+                val changed = cryptoActiveAccountId != newActiveId
+                
                 _cryptoAccountData.value = parseAccountData(snapshot, cryptoPath)
+                
+                if (changed) {
+                    cryptoActiveAccountId = newActiveId
+                    restartCryptoAccountSpecificListeners(cryptoPath, newActiveId)
+                }
             }
             override fun onCancelled(error: DatabaseError) {
                 Log.e("TradingApp", "Crypto Account Listener Cancelled: ${error.message}")
             }
         })
+    }
 
-        cryptoStatusListener = database.getReference("$cryptoPath/status").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _cryptoStatus.value = parseStatus(snapshot, cryptoPath)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+    private fun restartStockAccountSpecificListeners(servicePath: String, activeId: String) {
+        val accountPath = if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
+        Log.d("TradingApp", "Restarting Stock listeners on $accountPath")
+        
+        stockStatusListener?.let { stockStatusRef?.removeEventListener(it) }
+        stockSettingsListener?.let { stockSettingsRef?.removeEventListener(it) }
+        stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
+        laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
+        laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
 
-        cryptoSettingsListener = database.getReference("$cryptoPath/settings").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                _cryptoSettings.value = parseSettings(snapshot)
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        stockStatusRef = database.getReference("$accountPath/status")
+        stockSettingsRef = database.getReference("$accountPath/settings")
+        stockOrderRef = database.getReference("$accountPath/manual_orders")
+        laoreSettingsRef = database.getReference("$accountPath/laore_settings")
+        laoreStatusRef = database.getReference("$accountPath/laore_status")
 
-        cryptoOrderListener = database.getReference("$cryptoPath/manual_orders").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                parseOrderStatus(snapshot)
+        if (stockStatusListener == null) {
+            stockStatusListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _stockStatus.value = parseStatus(snapshot, accountPath)
+                }
+                override fun onCancelled(error: DatabaseError) {}
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        }
+        if (stockSettingsListener == null) {
+            stockSettingsListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _stockSettings.value = parseSettings(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (stockOrderListener == null) {
+            stockOrderListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    parseOrderStatus(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (laoreSettingsListener == null) {
+            laoreSettingsListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _laoreSettings.value = parseLaoreSettings(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (laoreStatusListener == null) {
+            laoreStatusListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _laoreStatus.value = parseLaoreStatus(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+
+        stockStatusRef?.addValueEventListener(stockStatusListener!!)
+        stockSettingsRef?.addValueEventListener(stockSettingsListener!!)
+        stockOrderRef?.addValueEventListener(stockOrderListener!!)
+        laoreSettingsRef?.addValueEventListener(laoreSettingsListener!!)
+        laoreStatusRef?.addValueEventListener(laoreStatusListener!!)
+    }
+
+    private fun restartCryptoAccountSpecificListeners(servicePath: String, activeId: String) {
+        val accountPath = if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
+        Log.d("TradingApp", "Restarting Crypto listeners on $accountPath")
+        
+        cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
+        cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
+        cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
+
+        cryptoStatusRef = database.getReference("$accountPath/status")
+        cryptoSettingsRef = database.getReference("$accountPath/settings")
+        cryptoOrderRef = database.getReference("$accountPath/manual_orders")
+
+        if (cryptoStatusListener == null) {
+            cryptoStatusListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _cryptoStatus.value = parseStatus(snapshot, accountPath)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (cryptoSettingsListener == null) {
+            cryptoSettingsListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _cryptoSettings.value = parseSettings(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (cryptoOrderListener == null) {
+            cryptoOrderListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    parseOrderStatus(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+
+        cryptoStatusRef?.addValueEventListener(cryptoStatusListener!!)
+        cryptoSettingsRef?.addValueEventListener(cryptoSettingsListener!!)
+        cryptoOrderRef?.addValueEventListener(cryptoOrderListener!!)
     }
 
     // ============ PARSING HELPERS ============
@@ -267,35 +349,58 @@ class TradingViewModel : ViewModel() {
         }
     }
 
-        private fun parseLaoreSettings(snapshot: DataSnapshot): LaoreSettings {
-        if (!snapshot.exists()) return LaoreSettings()
-        return LaoreSettings(
-            enabled = snapshot.child("enabled").value as? Boolean ?: false,
-            target_symbol = snapshot.child("target_symbol").value as? String ?: "",
-            total_budget = (snapshot.child("total_budget").value as? Number)?.toDouble() ?: 0.0,
-            split_count = (snapshot.child("split_count").value as? Number)?.toInt() ?: 40,
-            target_yield_percent = (snapshot.child("target_yield_percent").value as? Number)?.toFloat() ?: 10.0f
-        )
+        private fun parseLaoreSettings(snapshot: DataSnapshot): Map<String, LaoreSettings> {
+        if (!snapshot.exists()) return emptyMap()
+        val result = mutableMapOf<String, LaoreSettings>()
+        for (child in snapshot.children) {
+            val key = child.key ?: continue
+            result[key] = LaoreSettings(
+                enabled = child.child("enabled").value as? Boolean ?: false,
+                total_budget = (child.child("total_budget").value as? Number)?.toDouble() ?: 0.0,
+                split_count = (child.child("split_count").value as? Number)?.toInt() ?: 40,
+                target_yield_percent = (child.child("target_yield_percent").value as? Number)?.toFloat() ?: 10.0f
+            )
+        }
+        return result
     }
 
-        private fun parseLaoreStatus(snapshot: DataSnapshot): LaoreStatus {
-        if (!snapshot.exists()) return LaoreStatus()
-        return LaoreStatus(
-            current_round = (snapshot.child("current_round").value as? Number)?.toInt() ?: 0,
-            holding_quantity = (snapshot.child("holding_quantity").value as? Number)?.toDouble() ?: 0.0,
-            average_price = (snapshot.child("average_price").value as? Number)?.toDouble() ?: 0.0,
-            status_message = snapshot.child("status_message").value as? String ?: "",
-            current_mode = snapshot.child("current_mode").value as? String ?: "일반 모드(전반전)",
-            t_value = (snapshot.child("t_value").value as? Number)?.toDouble() ?: 0.0,
-            target_sell_price = (snapshot.child("target_sell_price").value as? Number)?.toDouble() ?: 0.0,
-            remaining_cash = (snapshot.child("remaining_cash").value as? Number)?.toDouble() ?: 0.0
-        )
+        private fun parseLaoreStatus(snapshot: DataSnapshot): Map<String, LaoreStatus> {
+        if (!snapshot.exists()) return emptyMap()
+        val result = mutableMapOf<String, LaoreStatus>()
+        for (child in snapshot.children) {
+            val key = child.key ?: continue
+            result[key] = LaoreStatus(
+                current_round = (child.child("current_round").value as? Number)?.toInt() ?: 0,
+                holding_quantity = (child.child("holding_quantity").value as? Number)?.toDouble() ?: 0.0,
+                average_price = (child.child("average_price").value as? Number)?.toDouble() ?: 0.0,
+                status_message = child.child("status_message").value as? String ?: "",
+                current_mode = child.child("current_mode").value as? String ?: "일반 모드(전반전)",
+                t_value = (child.child("t_value").value as? Number)?.toDouble() ?: 0.0,
+                target_sell_price = (child.child("target_sell_price").value as? Number)?.toDouble() ?: 0.0,
+                remaining_cash = (child.child("remaining_cash").value as? Number)?.toDouble() ?: 0.0
+            )
+        }
+        return result
     }
 
-    fun saveLaoreSettings(settings: LaoreSettings) {
+    fun updateStockName(symbol: String, name: String, serviceType: String = "stock") {
+        var sym = symbol.uppercase()
+        if (serviceType == "crypto" && !sym.contains("-")) {
+            sym = "KRW-$sym"
+        }
+        val path = "${getAccountPath(_userId.value, serviceType)}/status/stock_names"
+        database.getReference(path).child(sym).setValue(name)
+    }
+    fun saveLaoreSetting(compositeKey: String, settings: LaoreSettings) {
         val id = _userId.value.trim()
         if (id.isEmpty()) return
-        database.getReference("users/$id/stock/laore_settings").setValue(settings)
+        database.getReference("${getAccountPath(id, "stock")}/laore_settings/$compositeKey").setValue(settings)
+    }
+    
+    fun removeLaoreSetting(compositeKey: String) {
+        val id = _userId.value.trim()
+        if (id.isEmpty()) return
+        database.getReference("${getAccountPath(id, "stock")}/laore_settings/$compositeKey/enabled").setValue(false)
     }
 
     private fun parseSettings(snapshot: DataSnapshot): TradingSettings {
@@ -370,17 +475,20 @@ class TradingViewModel : ViewModel() {
         val stockPath = getServicePath(oldId, "stock")
         val cryptoPath = getServicePath(oldId, "crypto")
 
-        stockStatusListener?.let { database.getReference("$stockPath/status").removeEventListener(it) }
-        stockSettingsListener?.let { database.getReference("$stockPath/settings").removeEventListener(it) }
+        stockStatusListener?.let { stockStatusRef?.removeEventListener(it) }
+        stockSettingsListener?.let { stockSettingsRef?.removeEventListener(it) }
         stockAccountListener?.let { database.getReference("$stockPath/account_data").removeEventListener(it) }
-        stockOrderListener?.let { database.getReference("$stockPath/manual_orders").removeEventListener(it) }
-        laoreSettingsListener?.let { database.getReference("$stockPath/laore_settings").removeEventListener(it) }
-        laoreStatusListener?.let { database.getReference("$stockPath/laore_status").removeEventListener(it) }
+        stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
+        laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
+        laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
 
-        cryptoStatusListener?.let { database.getReference("$cryptoPath/status").removeEventListener(it) }
-        cryptoSettingsListener?.let { database.getReference("$cryptoPath/settings").removeEventListener(it) }
+        cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
+        cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
         cryptoAccountListener?.let { database.getReference("$cryptoPath/account_data").removeEventListener(it) }
-        cryptoOrderListener?.let { database.getReference("$cryptoPath/manual_orders").removeEventListener(it) }
+        cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
+        
+        stockActiveAccountId = ""
+        cryptoActiveAccountId = ""
     }
 
     fun saveAccountSecurely(info: AccountInfo, newPinToSet: String, currentlyVerifiedPin: String, serviceType: String, onComplete: (Boolean, String) -> Unit) {
@@ -456,7 +564,7 @@ class TradingViewModel : ViewModel() {
     }
 
     fun clearManualOrderFirebaseStatus(serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         database.getReference("$servicePath/manual_orders/status").setValue("NONE")
         database.getReference("$servicePath/manual_orders/error_message").setValue("")
     }
@@ -572,12 +680,12 @@ class TradingViewModel : ViewModel() {
     }
 
     fun toggleAutoTrading(enabled: Boolean, serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         database.getReference("$servicePath/settings/is_auto_trading").setValue(enabled)
     }
 
     fun updateWatchSymbols(symbols: List<String>, serviceType: String, isOverseas: Boolean? = null) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         val symbolsMap = mutableMapOf<String, SymbolSettings>()
         var index = 0
         
@@ -616,7 +724,7 @@ class TradingViewModel : ViewModel() {
     }
 
     fun sendManualOrder(command: String, symbol: String, quantity: Double, price: Double, serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val timestamp = sdf.format(Date())
         val order = ManualOrder(command, symbol, quantity, price, timestamp)
@@ -624,7 +732,7 @@ class TradingViewModel : ViewModel() {
     }
 
     fun sendConditionalOrder(symbol: String, side: String, quantity: Double, targetPrice: Double, serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val timestamp = sdf.format(Date())
         val orderId = java.util.UUID.randomUUID().toString()
@@ -633,7 +741,7 @@ class TradingViewModel : ViewModel() {
     }
 
     fun sendStopLossOrder(symbol: String, triggerPrice: Double, volumePercent: Int, serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val timestamp = sdf.format(Date())
         val orderId = java.util.UUID.randomUUID().toString()
@@ -642,7 +750,7 @@ class TradingViewModel : ViewModel() {
     }
 
     fun updateSurgeTradingSettings(config: SurgeTradingConfig, serviceType: String) {
-        val servicePath = getServicePath(_userId.value, serviceType)
+        val servicePath = getAccountPath(_userId.value, serviceType)
         database.getReference("$servicePath/settings/surge_trading").setValue(config)
     }
 
@@ -651,6 +759,7 @@ class TradingViewModel : ViewModel() {
         stopListening()
     }
 }
+
 
 
 

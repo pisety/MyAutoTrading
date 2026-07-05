@@ -1,3 +1,4 @@
+import urllib.request
 import jwt
 import uuid
 import json
@@ -14,17 +15,28 @@ from brokers.base_broker import BaseBroker
 logger = logging.getLogger("UpbitBroker")
 
 
+def _fetch_upbit_coin_names():
+    try:
+        req = urllib.request.Request('https://api.upbit.com/v1/market/all?isDetails=false')
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            return { m['market'].split('-')[1]: m['korean_name'] for m in data if m['market'].startswith('KRW-') }
+    except Exception as e:
+        logger.warning(f"Failed to fetch coin names: {e}")
+        return {
+            "BTC": "비트코인", "ETH": "이더리움", "XRP": "리플", "SOL": "솔라나",
+            "DOGE": "도지코인", "ADA": "에이다", "AVAX": "아발란체", "DOT": "폴카닷",
+            "MATIC": "폴리곤", "LINK": "체인링크", "TRX": "트론", "ATOM": "코스모스",
+            "ETC": "이더리움클래식", "BCH": "비트코인캐시", "XLM": "스텔라루멘",
+            "SAND": "샌드박스", "MANA": "디센트럴랜드", "AXS": "액시인피니티",
+            "EOS": "이오스", "SHIB": "시바이누",
+        }
+
+
 class UpbitBroker(BaseBroker):
     """업비트 암호화폐 거래소 브로커 (JWT per-request 인증)"""
 
-    COIN_NAMES = {
-        "BTC": "비트코인", "ETH": "이더리움", "XRP": "리플", "SOL": "솔라나",
-        "DOGE": "도지코인", "ADA": "에이다", "AVAX": "아발란체", "DOT": "폴카닷",
-        "MATIC": "폴리곤", "LINK": "체인링크", "TRX": "트론", "ATOM": "코스모스",
-        "ETC": "이더리움클래식", "BCH": "비트코인캐시", "XLM": "스텔라루멘",
-        "SAND": "샌드박스", "MANA": "디센트럴랜드", "AXS": "액시인피니티",
-        "EOS": "이오스", "SHIB": "시바이누",
-    }
+    COIN_NAMES = _fetch_upbit_coin_names()
 
     def __init__(self, access_key: str, secret_key: str):
         super().__init__(access_key, secret_key, account_number="", is_mock=False)

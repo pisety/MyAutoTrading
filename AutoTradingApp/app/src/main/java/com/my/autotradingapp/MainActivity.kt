@@ -47,6 +47,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.firebase.messaging.FirebaseMessaging
 import com.my.autotradingapp.ui.components.WatchlistManagementDialog
+
+fun formatIsoTimeKst(isoTime: String): String {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val zdt = java.time.ZonedDateTime.parse(isoTime)
+            val kstZdt = zdt.withZoneSameInstant(java.time.ZoneId.of("Asia/Seoul"))
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
+            return kstZdt.format(formatter)
+        }
+    } catch(e: Exception) {}
+    
+    return isoTime.replace(Regex("T"), " ").replace(Regex("\\.\\d+.*|\\+.*|Z"), "")
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,14 +73,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MainContent(viewModel: TradingViewModel = viewModel()) {
-    var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("주식", "코인", "라오어 무한매수")
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { tabs.size })
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     
     val currentUserId by viewModel.userId.collectAsState()
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("TradingApp", android.content.Context.MODE_PRIVATE)
     
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -78,6 +94,10 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             if (permission != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
+        val lastUserId = prefs.getString("LastUsedUserId", "")
+        if (!lastUserId.isNullOrEmpty() && currentUserId.isEmpty()) {
+            viewModel.setUserId(lastUserId)
         }
     }
 
@@ -109,20 +129,29 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                 .imePadding()
                 .fillMaxSize()
         ) {
-            TabRow(selectedTabIndex = selectedTab) {
+            TabRow(selectedTabIndex = pagerState.currentPage) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        selected = pagerState.currentPage == index,
+                        onClick = { 
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        },
                         text = { Text(title) }
                     )
                 }
             }
 
-            when (selectedTab) {
-                0 -> StockTabContent(viewModel)
-                1 -> CryptoTabContent(viewModel)
-                2 -> LaoreTabContent(viewModel)
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                when (page) {
+                    0 -> StockTabContent(viewModel)
+                    1 -> CryptoTabContent(viewModel)
+                    2 -> LaoreTabContent(viewModel)
+                }
             }
         }
     }
@@ -270,6 +299,7 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                                 if (histId != currentUserId) {
                                     isPinVerified = false
                                     viewModel.setUserId(histId)
+                                    prefs.edit().putString("LastUsedUserId", histId).apply()
                                 }
                             }
                         )
@@ -380,6 +410,7 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
         Button(
             onClick = {
                 viewModel.setUserId(userIdInput)
+                prefs.edit().putString("LastUsedUserId", userIdInput).apply()
                 viewModel.clearAuthErrorLocally("stock")
                 viewModel.saveAccountSecurely(
                     AccountInfo(broker, isMock, isOverseas, accountNumber, appKey, appSecret),
@@ -504,8 +535,9 @@ fun StockTradingScreen(
             isCrypto = false,
             suggestions = suggestions,
             onDismiss = { showWatchlistDialog = false },
-            onSave = { managedList ->
+            onSave = { managedList, newNames ->
                 viewModel.updateWatchSymbols(managedList, "stock", isOverseas)
+                newNames.forEach { (sym, name) -> viewModel.updateStockName(sym, name, "stock") }
                 showWatchlistDialog = false
             }
         )
@@ -948,7 +980,7 @@ fun StockTradingScreen(
 
                     var lastKnownTime by remember { mutableStateOf("") }
                     if (status.last_updated.isNotBlank()) {
-                        lastKnownTime = status.last_updated.replace(Regex("\\.(\\d)\\d+"), ".$1")
+                        lastKnownTime = formatIsoTimeKst(status.last_updated)
                     }
                     
                     Text(
@@ -1224,6 +1256,7 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
                                 if (histId != currentUserId) {
                                     isPinVerified = false
                                     viewModel.setUserId(histId)
+                                    prefs.edit().putString("LastUsedUserId", histId).apply()
                                 }
                             }
                         )
@@ -1284,6 +1317,7 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
         Button(
             onClick = {
                 viewModel.setUserId(userIdInput)
+                prefs.edit().putString("LastUsedUserId", userIdInput).apply()
                 viewModel.clearAuthErrorLocally("crypto")
                 viewModel.saveAccountSecurely(
                     AccountInfo("업비트", false, false, "", appKey, appSecret),
@@ -1406,8 +1440,9 @@ fun CryptoTradingScreen(
             isCrypto = true,
             suggestions = suggestions,
             onDismiss = { showWatchlistDialog = false },
-            onSave = { managedList ->
+            onSave = { managedList, newNames ->
                 viewModel.updateWatchSymbols(managedList, "crypto")
+                newNames.forEach { (sym, name) -> viewModel.updateStockName("KRW-$sym", name, "crypto") }
                 showWatchlistDialog = false
             }
         )
@@ -1833,7 +1868,7 @@ fun CryptoTradingScreen(
 
                     var lastKnownTime by remember { mutableStateOf("") }
                     if (status.last_updated.isNotBlank()) {
-                        lastKnownTime = status.last_updated.replace(Regex("\\.(\\d)\\d+"), ".$1")
+                        lastKnownTime = formatIsoTimeKst(status.last_updated)
                     }
                     
                     Text(
@@ -2137,6 +2172,7 @@ fun Modifier.mouseScroll(state: LazyListState): Modifier = composed {
 @Composable
 fun LaoreTabContent(viewModel: TradingViewModel) {
     var showAccountSetup by remember { mutableStateOf(false) }
+    var showSetupDialog by remember { mutableStateOf(false) }
     
     if (showAccountSetup) {
         StockAccountSetupScreen(
@@ -2146,14 +2182,13 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
         return
     }
 
-    val settings by viewModel.laoreSettings.collectAsState()
-    val status by viewModel.laoreStatus.collectAsState()
-    
-    var enabled by remember(settings) { mutableStateOf(settings.enabled) }
-    var targetSymbol by remember(settings) { mutableStateOf(settings.target_symbol) }
-    var totalBudget by remember(settings) { mutableStateOf(settings.total_budget.toString()) }
-    var splitCount by remember(settings) { mutableStateOf(settings.split_count.toString()) }
-    var targetYield by remember(settings) { mutableStateOf(settings.target_yield_percent.toString()) }
+    val settingsMap by viewModel.laoreSettings.collectAsState()
+    val statusMap by viewModel.laoreStatus.collectAsState()
+    val stockStatus by viewModel.stockStatus.collectAsState(); val suggestions = stockStatus.stock_names
+    val activeAcc = viewModel.stockAccountData.collectAsState().value.saved_accounts[
+        viewModel.stockAccountData.collectAsState().value.active_account_id
+    ]
+    val isOverseas = activeAcc?.is_overseas ?: true
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -2166,86 +2201,332 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                 horizontalArrangement = Arrangement.End
             ) {
                 OutlinedButton(onClick = { showAccountSetup = true }) {
-                    Text("⚙ 계좌 설정")
+                    Text("앱계좌 설정")
                 }
             }
         }
+        
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("진행 현황", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
-                    Text("현재 회차: ${status.current_round} / ${settings.split_count}")
-                    Text("진행 모드: ${status.current_mode}")
-                    Text("T값 (진행도): ${String.format("%.2f", status.t_value)}")
-                    Text("보유 수량: ${status.holding_quantity}주")
-                    Text("평균 단가: ${status.average_price}")
-                    Text("목표 별지점(매도가): ${status.target_sell_price}")
-                    Text("잔여 현금(Pool): ${String.format("%,.0f", status.remaining_cash)}")
-                    if (status.status_message.isNotEmpty()) {
-                        Text("상태: ${status.status_message}", color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+            Text("무한매수법 대시보드", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+
+        if (settingsMap.isEmpty()) {
+            item {
+                Text("현재 설정된 무한매수 세트가 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 32.dp))
+            }
+        } else {
+            val sortedSettings = settingsMap.toList().sortedWith(compareBy({ it.first.substringAfter("_") }, { it.first.substringBefore("_").toIntOrNull() ?: 1 }))
+            items(sortedSettings) { (compositeKey, setting) ->
+                val parts = compositeKey.split("_", limit = 2)
+                val setId = if (parts.size == 2) parts[0] else "1"
+                val symbol = if (parts.size == 2) parts[1] else compositeKey
+                
+                val status = statusMap[compositeKey] ?: com.my.autotradingapp.data.LaoreStatus()
+                val name = suggestions[symbol] ?: symbol
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column {
+                                Text(text = "[세트 $setId] ${name} (${symbol})", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text(text = "상태: ${if (setting.enabled) "활성화" else "중지됨"}", color = if (setting.enabled) Color(0xFF1976D2) else Color.Gray)
+                            }
+                            Switch(
+                                checked = setting.enabled,
+                                onCheckedChange = { isChecked ->
+                                    viewModel.saveLaoreSetting(compositeKey, setting.copy(enabled = isChecked))
+                                }
+                            )
+                        }
+                        
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("모드: ${status.current_mode}", style = MaterialTheme.typography.bodyMedium)
+                            Text("진행률: ${status.current_round} / ${setting.split_count}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("평단가: ${if(isOverseas) "$" else "￦"}${String.format(java.util.Locale.US, "%.2f", status.average_price)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("보유수량: ${String.format(java.util.Locale.US, "%.4f", status.holding_quantity)}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("투자자금: ${if(isOverseas) "$" else "￦"}${String.format(java.util.Locale.US, "%,.0f", setting.total_budget)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("목표수익률: ${setting.target_yield_percent}%", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        
+                        if (status.status_message.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(text = "최근 메시지: ${status.status_message}", style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                        }
+                        
+                        Row(modifier = Modifier.fillMaxWidth().padding(top=8.dp), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { viewModel.removeLaoreSetting(compositeKey) }) {
+                                Text("삭제/종료", color = Color.Red)
+                            }
+                        }
                     }
                 }
             }
         }
-
+        
         item {
-            Text("무한매수법 설정", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
-            
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-                Text("자동매매 가동", modifier = Modifier.weight(1f))
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
-            }
-
-            OutlinedTextField(
-                value = targetSymbol,
-                onValueChange = { targetSymbol = it },
-                label = { Text("대상 종목 코드 (예: TQQQ)") },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-            )
-
-            OutlinedTextField(
-                value = totalBudget,
-                onValueChange = { totalBudget = it },
-                label = { Text("총 투자 원금 (KRW/USD)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-            )
-
-            OutlinedTextField(
-                value = splitCount,
-                onValueChange = { splitCount = it },
-                label = { Text("분할 횟수 (기본 40)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-            )
-
-            OutlinedTextField(
-                value = targetYield,
-                onValueChange = { targetYield = it },
-                label = { Text("목표 수익률 (%) (기본 10)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-            )
-
             Button(
-                onClick = {
-                    val newSettings = LaoreSettings(
-                        enabled = enabled,
-                        target_symbol = targetSymbol,
-                        total_budget = totalBudget.toDoubleOrNull() ?: 0.0,
-                        split_count = splitCount.toIntOrNull() ?: 40,
-                        target_yield_percent = targetYield.toFloatOrNull() ?: 10.0f
-                    )
-                    viewModel.saveLaoreSettings(newSettings)
-                },
-                modifier = Modifier.fillMaxWidth()
+                onClick = { showSetupDialog = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
             ) {
-                Text("설정 저장")
+                Text("+ 새 무한매수 세트 추가")
             }
         }
     }
+
+    if (showSetupDialog) {
+        LaoreSetupDialog(
+            isOverseas = isOverseas,
+            suggestions = suggestions,
+            onDismiss = { showSetupDialog = false },
+            onSave = { symbol, name, budget, split, yield ->
+                if (name.isNotEmpty() && name != symbol) {
+                    viewModel.updateStockName(symbol, name)
+                }
+                
+                val existingSets = settingsMap.keys.filter { it.endsWith("_$symbol") }
+                var maxSetId = 0
+                for (k in existingSets) {
+                    val id = k.substringBefore("_").toIntOrNull() ?: 1
+                    if (id > maxSetId) maxSetId = id
+                }
+                val nextSetId = maxSetId + 1
+                val newCompositeKey = "${nextSetId}_${symbol}"
+
+                viewModel.saveLaoreSetting(newCompositeKey, com.my.autotradingapp.data.LaoreSettings(
+                    enabled = true,
+                    total_budget = budget,
+                    split_count = split,
+                    target_yield_percent = yield
+                ))
+                showSetupDialog = false
+            }
+        )
+    }
 }
 
+@Composable
+fun LaoreSetupDialog(
+    isOverseas: Boolean,
+    suggestions: Map<String, String>,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Double, Int, Float) -> Unit
+) {
+    var searchInput by remember { mutableStateOf("") }
+    var selectedSymbol by remember { mutableStateOf("") }
+    var selectedName by remember { mutableStateOf("") }
+    var budgetInput by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+    var splitInput by remember { mutableStateOf("40") }
+    var yieldInput by remember { mutableStateOf("10.0") }
+    
+    var apiSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    
+    LaunchedEffect(searchInput) {
+        if (searchInput.length >= 2 && selectedSymbol.isEmpty()) {
+            if (isOverseas) {
+                val results = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val encoded = java.net.URLEncoder.encode(searchInput, "UTF-8")
+                        val url = java.net.URL("https://query2.finance.yahoo.com/v1/finance/search?q=${encoded}")
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.requestMethod = "GET"
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                        conn.connectTimeout = 3000
+                        conn.readTimeout = 3000
+                        if (conn.responseCode == 200) {
+                            val response = conn.inputStream.bufferedReader().readText()
+                            val json = org.json.JSONObject(response)
+                            val quotes = json.optJSONArray("quotes")
+                            val list = mutableListOf<String>()
+                            if (quotes != null) {
+                                for (i in 0 until quotes.length()) {
+                                    val item = quotes.optJSONObject(i) ?: continue
+                                    val sym = item.optString("symbol", "")
+                                    val shortname = item.optString("shortname", "")
+                                    if (sym.isNotEmpty()) {
+                                        list.add(if (shortname.isNotEmpty()) "$shortname ($sym)" else sym)
+                                    }
+                                }
+                            }
+                            list
+                        } else emptyList()
+                    } catch (e: Exception) { emptyList() }
+                }
+                apiSuggestions = results
+            } else {
+                val results = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val jsonString = context.assets.open("krx_stocks.json").bufferedReader().use { it.readText() }
+                        val jsonArray = org.json.JSONArray(jsonString)
+                        val list = mutableListOf<String>()
+                        val query = searchInput.lowercase()
+                        for (i in 0 until jsonArray.length()) {
+                            val item = jsonArray.optJSONObject(i) ?: continue
+                            val sym = item.optString("symbol", "")
+                            val name = item.optString("name", "")
+                            if (sym.contains(query) || name.lowercase().contains(query)) {
+                                list.add("$name ($sym)")
+                            }
+                            if (list.size >= 20) break
+                        }
+                        list
+                    } catch (e: Exception) { emptyList() }
+                }
+                apiSuggestions = results
+            }
+        } else {
+            apiSuggestions = emptyList()
+        }
+    }
+
+    val filteredSuggestions = remember(searchInput, apiSuggestions) {
+        if (searchInput.isBlank()) emptyList()
+        else {
+            if (apiSuggestions.isNotEmpty()) {
+                apiSuggestions
+            } else {
+                val query = searchInput.lowercase()
+                suggestions.filter {
+                    it.key.lowercase().contains(query) || it.value.lowercase().contains(query)
+                }.map { "${it.value} (${it.key})" }.toList()
+            }
+        }
+    }
+
+    val extractCode: (String) -> String = { str ->
+        if (str.contains("(") && str.endsWith(")")) {
+            str.substringAfterLast("(").removeSuffix(")").trim()
+        } else {
+            str.trim()
+        }
+    }
+    
+    val extractName: (String) -> String = { str ->
+        if (str.contains("(")) {
+            str.substringBeforeLast("(").trim().ifEmpty { extractCode(str) }
+        } else {
+            str.trim()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("무한매수 세트 추가") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (selectedSymbol.isEmpty()) {
+                    OutlinedTextField(
+                        value = searchInput,
+                        onValueChange = { searchInput = it },
+                        label = { Text("종목명 검색") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    
+                    if (filteredSuggestions.isNotEmpty()) {
+                        Card(modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)) {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                filteredSuggestions.forEach { suggestion ->
+                                    Text(
+                                        text = suggestion,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selectedSymbol = extractCode(suggestion)
+                                                selectedName = extractName(suggestion)
+                                                searchInput = suggestion
+                                            }
+                                            .padding(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = if (selectedName.isNotEmpty() && selectedName != selectedSymbol) "$selectedName ($selectedSymbol)" else selectedSymbol,
+                        onValueChange = {},
+                        label = { Text("선택된 종목") },
+                        modifier = Modifier.fillMaxWidth(),
+                        readOnly = true,
+                        trailingIcon = {
+                            IconButton(onClick = { selectedSymbol = ""; selectedName = ""; searchInput = "" }) {
+                                Text("X", color = Color.Red)
+                            }
+                        }
+                    )
+                    
+                    OutlinedTextField(
+                        value = budgetInput,
+                        onValueChange = { newValue ->
+                            val clean = newValue.text.replace(",", "")
+                            val filtered = clean.filter { char -> char.isDigit() || char == '.' }
+                            val parts = filtered.split(".")
+                            val num = parts[0].toLongOrNull()
+                            var formatted = if (num != null) java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(num) else ""
+                            if (parts.size > 1) formatted += "." + parts[1]
+                            
+                            val finalText = if (clean.isEmpty()) "" else formatted
+                            
+                            val charsFromEnd = newValue.text.length - newValue.selection.end
+                            val newCursorPos = Math.max(0, finalText.length - charsFromEnd)
+                            
+                            budgetInput = androidx.compose.ui.text.input.TextFieldValue(
+                                text = finalText,
+                                selection = androidx.compose.ui.text.TextRange(newCursorPos)
+                            )
+                        },
+                        label = { Text("투자 자금 (${if(isOverseas) "USD" else "KRW"})") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                    
+                    OutlinedTextField(
+                        value = splitInput,
+                        onValueChange = { splitInput = it.filter { char -> char.isDigit() } },
+                        label = { Text("분할 횟수 (기본 40)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
+                    
+                    OutlinedTextField(
+                        value = yieldInput,
+                        onValueChange = { yieldInput = it.filter { char -> char.isDigit() || char == '.' } },
+                        label = { Text("목표 수익률 (%) (기본 10)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val budget = budgetInput.text.replace(",", "").toDoubleOrNull() ?: 0.0
+                    val split = splitInput.toIntOrNull() ?: 40
+                    val yieldVal = yieldInput.toFloatOrNull() ?: 10.0f
+                    if (selectedSymbol.isNotEmpty() && budget > 0) {
+                        onSave(selectedSymbol, selectedName, budget, split, yieldVal)
+                    }
+                },
+                enabled = selectedSymbol.isNotEmpty() && (budgetInput.text.replace(",", "").toDoubleOrNull() ?: 0.0) > 0
+            ) {
+                Text("저장")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}

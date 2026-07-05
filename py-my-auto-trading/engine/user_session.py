@@ -38,11 +38,31 @@ class UserSession:
         self._running = False
         self._loop = asyncio.get_event_loop()
         self._last_rest_price = 0.0
+        self.active_account_id = None
+
+    @property
+    def account_path(self):
+        if self.active_account_id:
+            return f"{self.base_path}/accounts/{self.active_account_id}"
+        return self.base_path
 
     @property
     def base_path(self):
         """Firebase 경로 기본 프리픽스: users/{uid}/{service_type}"""
         return f"users/{self.uid}/{self.service_type}"
+
+    def _update_account_listeners(self, old_id, new_id):
+        old_path = f"{self.base_path}/accounts/{old_id}" if old_id else self.base_path
+        new_path = f"{self.base_path}/accounts/{new_id}" if new_id else self.base_path
+        
+        paths = ["settings", "manual_orders", "conditional_orders", "stop_loss_orders"]
+        for p in paths:
+            self.fb.remove_listener(f"{old_path}/{p}")
+            
+        self.fb.listen(f"{new_path}/settings", self._on_settings_change)
+        self.fb.listen(f"{new_path}/manual_orders", self._on_manual_order)
+        self.fb.listen(f"{new_path}/conditional_orders", self._on_conditional_orders_change)
+        self.fb.listen(f"{new_path}/stop_loss_orders", self._on_stop_loss_orders_change)
 
     async def start(self):
         logger.info(f"Starting session for user: {self.uid}")
@@ -50,14 +70,18 @@ class UserSession:
         
         # Load initial config
         self._load_account_data()
+        self.active_account_id = self.account_data.active_account_id
+        
         self._load_settings()
         
         # Register firebase listeners
-        self.fb.listen(f"{self.base_path}/settings", self._on_settings_change)
         self.fb.listen(f"{self.base_path}/account_data", self._on_account_change)
-        self.fb.listen(f"{self.base_path}/manual_orders", self._on_manual_order)
-        self.fb.listen(f"{self.base_path}/conditional_orders", self._on_conditional_orders_change)
-        self.fb.listen(f"{self.base_path}/stop_loss_orders", self._on_stop_loss_orders_change)
+        
+        new_path = self.account_path
+        self.fb.listen(f"{new_path}/settings", self._on_settings_change)
+        self.fb.listen(f"{new_path}/manual_orders", self._on_manual_order)
+        self.fb.listen(f"{new_path}/conditional_orders", self._on_conditional_orders_change)
+        self.fb.listen(f"{new_path}/stop_loss_orders", self._on_stop_loss_orders_change)
         
         self._setup_broker()
         
@@ -72,9 +96,10 @@ class UserSession:
         if self.broker:
             await self.broker.close_websocket()
         
-        paths = ["settings", "account_data", "manual_orders", "conditional_orders", "stop_loss_orders"]
+        self.fb.remove_listener(f"{self.base_path}/account_data")
+        paths = ["settings", "manual_orders", "conditional_orders", "stop_loss_orders"]
         for p in paths:
-            self.fb.remove_listener(f"{self.base_path}/{p}")
+            self.fb.remove_listener(f"{self.account_path}/{p}")
 
     def _load_account_data(self):
         data = self.fb.get_data(f"{self.base_path}/account_data")
@@ -82,9 +107,21 @@ class UserSession:
             self.account_data = AccountData(**data)
 
     def _load_settings(self):
-        data = self.fb.get_data(f"{self.base_path}/settings")
+        data = self.fb.get_data(f"{self.account_path}/settings")
         if data:
             self.settings = Settings(**data)
+
+    def _get_active_symbols(self):
+        symbols = set(s for s, v in self.settings.watch_symbols.items() if v.enabled)
+        laore = self.fb.get_data(f"{self.account_path}/laore_settings") or {}
+        if isinstance(laore, dict):
+            for k, cfg in laore.items():
+                if isinstance(cfg, dict) and cfg.get("enabled", False):
+                    parts = k.split("_", 1)
+                    sym = parts[1] if len(parts) > 1 else k
+                    symbols.add(sym)
+        logger.info(f"ACTIVE SYMBOLS: {symbols}")
+        return list(symbols)
 
     def _setup_broker(self):
         active_id = self.account_data.active_account_id
@@ -102,7 +139,7 @@ class UserSession:
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}, OS: {acc.is_overseas}")
                 
                 # 기존 가격 정보 복원 (장이 닫혀있을 때 UI 빈화면 방지)
-                status_data = self.fb.get_data(f"{self.base_path}/status")
+                status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
                         if sym in self.settings.watch_symbols:
@@ -121,7 +158,7 @@ class UserSession:
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}")
                 
                 # 기존 가격 정보 복원
-                status_data = self.fb.get_data(f"{self.base_path}/status")
+                status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
                         if sym in self.settings.watch_symbols:
@@ -138,7 +175,7 @@ class UserSession:
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id})")
 
                 # 기존 가격 정보 복원
-                status_data = self.fb.get_data(f"{self.base_path}/status")
+                status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
                         if sym in self.settings.watch_symbols:
@@ -155,7 +192,7 @@ class UserSession:
                 # Clear Firebase status so UI knows it's inactive
                 self.price_data.clear()
                 
-                self.fb.update_data(f"{self.base_path}/status", {
+                self.fb.update_data(f"{self.account_path}/status", {
                     "total_balance": 0.0,
                     "current_yield": 0.0,
                     "holdings": {},
@@ -170,9 +207,18 @@ class UserSession:
 
     async def _do_restart_websocket(self):
         await self.broker.close_websocket()
-        symbols = [s for s, v in self.settings.watch_symbols.items() if v.enabled]
+        symbols = self._get_active_symbols()
             
         if symbols:
+            # WebSocket 이벤트가 발생하기 전 UI가 "로딩중"에 머무는 것을 방지하기 위해 초기 시세 강제 조회
+            try:
+                initial_prices = await self.broker.fetch_rest_current_prices(symbols)
+                logger.info(f"initial_prices for {symbols}: {initial_prices}")
+                for sym, price in initial_prices.items():
+                    self.price_data[sym] = price
+            except Exception as e:
+                logger.error(f"Failed to fetch initial prices via REST: {e}")
+                
             await self.broker.connect_websocket(symbols, self._on_ws_price)
 
     def _on_ws_price(self, symbol: str, price: float):
@@ -190,7 +236,10 @@ class UserSession:
         self._load_settings()
         
         # 삭제된 감시종목에 대한 유령 캐시 지우기
-        removed_symbols = [s for s in self.price_data.keys() if s not in self.settings.watch_symbols]
+        active_symbols = self._get_active_symbols()
+        removed_symbols = [s for s in self.price_data.keys() if s not in active_symbols]
+        if removed_symbols:
+            logger.info(f"Removing ghost symbols: {removed_symbols} from {list(self.price_data.keys())} vs {active_symbols}")
         for s in removed_symbols:
             self.price_data.pop(s, None)
             
@@ -201,7 +250,21 @@ class UserSession:
         self._loop.call_soon_threadsafe(self._handle_account_update)
 
     def _handle_account_update(self):
+        old_id = getattr(self, "active_account_id", None)
         self._load_account_data()
+        new_id = self.account_data.active_account_id
+        
+        if old_id != new_id:
+            logger.info(f"[{self.uid}] Active account changed from {old_id} to {new_id}")
+            self._update_account_listeners(old_id, new_id)
+            self.active_account_id = new_id
+            self._load_settings()
+            
+            # Reset local state for new account
+            self.price_data.clear()
+            self.price_history.clear()
+            self.stock_names.clear()
+            
         self._setup_broker()
 
     def _on_manual_order(self, event):
@@ -230,13 +293,13 @@ class UserSession:
         if success:
             logger.info(f"[{self.uid}] Manual order executed: {cmd} {sym} {qty}")
             self.fb.send_push_notification(self.uid, "수동 주문 체결", f"[{sym}] {cmd} {qty} 주문이 체결되었습니다.")
-            self.fb.update_data(f"{self.base_path}/manual_orders", {
+            self.fb.update_data(f"{self.account_path}/manual_orders", {
                 "command": "NONE",
                 "status": "SUCCESS",
                 "error_message": ""
             })
         else:
-            self.fb.update_data(f"{self.base_path}/manual_orders", {
+            self.fb.update_data(f"{self.account_path}/manual_orders", {
                 "command": "NONE",
                 "status": "FAILED",
                 "error_message": err_msg
@@ -246,7 +309,7 @@ class UserSession:
         self._loop.call_soon_threadsafe(self._handle_conditional_update)
 
     def _handle_conditional_update(self):
-        data = self.fb.get_data(f"{self.base_path}/conditional_orders")
+        data = self.fb.get_data(f"{self.account_path}/conditional_orders")
         if isinstance(data, dict):
             self.conditional_orders = {k: ConditionalOrder(**v) for k, v in data.items() if v.get("status") == "PENDING"}
 
@@ -254,25 +317,28 @@ class UserSession:
         self._loop.call_soon_threadsafe(self._handle_stop_loss_update)
 
     def _handle_stop_loss_update(self):
-        data = self.fb.get_data(f"{self.base_path}/stop_loss_orders")
+        data = self.fb.get_data(f"{self.account_path}/stop_loss_orders")
         if isinstance(data, dict):
             self.stop_loss_orders = {k: StopLossOrder(**v) for k, v in data.items() if v.get("status") == "PENDING"}
 
     async def _fetch_stock_name(self, symbol: str) -> str:
-        # 업비트 브로커인 경우 코인 이름 매핑 사용
-        if isinstance(self.broker, UpbitBroker):
-            return UpbitBroker.get_coin_name(symbol)
-        if self.broker and self.broker.is_overseas:
-            return symbol
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"https://finance.naver.com/item/main.naver?code={symbol.strip()}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as res:
-                    raw_bytes = await res.read()
-                    text = raw_bytes.decode('euc-kr', errors='replace')
-                    match = re.search(r'<title>(.*?)\s*:\s*(?:네이버|Npay)', text)
-                    if match:
-                        return match.group(1).strip()
+            if "crypto" in self.base_path:
+                from brokers.upbit_broker import UpbitBroker
+                return UpbitBroker.get_coin_name(symbol)
+            else:
+                async with aiohttp.ClientSession() as session:
+                    url = f"https://finance.naver.com/item/main.naver?code={symbol.strip()}"
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as res:
+                        raw_bytes = await res.read()
+                        try:
+                            text = raw_bytes.decode('utf-8')
+                        except UnicodeDecodeError:
+                            text = raw_bytes.decode('euc-kr', errors='replace')
+                            
+                        match = re.search(r'<title>(.*?)\s*:\s*(?:\uB124\uC774\uBC84|Npay)', text)
+                        if match:
+                            return match.group(1).strip()
         except Exception as e:
             logger.debug(f"Failed to fetch stock name for {symbol}: {e}")
         return symbol
@@ -282,79 +348,85 @@ class UserSession:
         self._last_balance_check = 0.0
         
         while self._running:
-            now = time.time()
-            
-            if now - last_sync >= 1.0:
-                kst = timezone(timedelta(hours=9))
-                self.fb.set_data(f"{self.base_path}/status/stock_prices", self.price_data)
-                if self.stock_names:
-                    self.fb.set_data(f"{self.base_path}/status/stock_names", self.stock_names)
-                self.fb.set_data(f"{self.base_path}/status/last_updated", datetime.now(kst).isoformat())
-                last_sync = now
-                
-            if self.broker and now - self._last_balance_check > 30.0:
-                bal, yld, holdings = await self.broker.get_balance()
-                status_update = {}
-                if bal is not None:
-                    status_update["total_balance"] = float(bal)
-                    status_update["current_yield"] = float(yld) if yld else 0.0
+            try:
+                now = time.time()
+                # logger.info(f"[{self.base_path}] Loop tick")
+                if now - last_sync >= 1.0:
+                    kst = timezone(timedelta(hours=9))
+                    if "crypto" in self.base_path:
+                        logger.info(f"Writing to Firebase {self.account_path}/status/stock_prices: {self.price_data}")
+                    self.fb.set_data(f"{self.account_path}/status/stock_prices", self.price_data)
+                    if self.stock_names:
+                        self.fb.update_data(f"{self.account_path}/status/stock_names", self.stock_names)
+                    self.fb.set_data(f"{self.account_path}/status/last_updated", datetime.now(kst).isoformat())
+                    last_sync = now
                     
-                    holdings_data = {}
-                    if holdings:
-                        for h in holdings:
-                            holdings_data[h["symbol"]] = {
-                                "symbol": h["symbol"],
-                                "quantity": float(h["quantity"]),
-                                "purchase_avg_price": float(h["purchase_avg_price"]),
-                                "current_price": float(h["current_price"]),
-                                "profit_loss_amount": float(h["profit_loss_amount"]),
-                                "profit_loss_rate": float(h["profit_loss_rate"]),
-                                "name": h.get("name", "")
-                            }
-                    status_update["holdings"] = holdings_data
-                    status_update["last_updated"] = time.time()
-                    status_update["auth_error"] = ""
-                else:
-                    status_update["total_balance"] = 0.0
-                    status_update["current_yield"] = 0.0
-                    status_update["holdings"] = {}
-                    status_update["last_updated"] = time.time()
-                    status_update["auth_error"] = "API 키 인증에 실패했습니다. 키를 확인해 주세요."
+                if self.broker and now - self._last_balance_check > 30.0:
+                    bal, yld, holdings = await self.broker.get_balance()
+                    status_update = {}
+                    if bal is not None:
+                        status_update["total_balance"] = float(bal)
+                        status_update["current_yield"] = float(yld) if yld else 0.0
+                        
+                        holdings_data = {}
+                        if holdings:
+                            for h in holdings:
+                                holdings_data[h["symbol"]] = {
+                                    "symbol": h["symbol"],
+                                    "quantity": float(h["quantity"]),
+                                    "purchase_avg_price": float(h["purchase_avg_price"]),
+                                    "current_price": float(h["current_price"]),
+                                    "profit_loss_amount": float(h["profit_loss_amount"]),
+                                    "profit_loss_rate": float(h["profit_loss_rate"]),
+                                    "name": h.get("name", "")
+                                }
+                        status_update["holdings"] = holdings_data
+                        status_update["last_updated"] = time.time()
+                        status_update["auth_error"] = ""
+                    else:
+                        status_update["total_balance"] = 0.0
+                        status_update["current_yield"] = 0.0
+                        status_update["holdings"] = {}
+                        status_update["last_updated"] = time.time()
+                        status_update["auth_error"] = "API 키 인증에 실패했습니다. 키를 확인해 주세요."
 
-                self.fb.update_data(f"{self.base_path}/status", status_update)
-                self._last_balance_check = now
-                
-            if self.broker and (now - self._last_rest_price >= 30.0):
-                symbols = [s for s, v in self.settings.watch_symbols.items() if v.enabled]
-                stale_symbols = []
-                for sym in symbols:
-                    hist = self.price_history.get(sym)
-                    if not hist or (now - hist[-1][0] > 25):
-                        stale_symbols.append(sym)
-                
-                if stale_symbols:
-                    rest_prices = await self.broker.fetch_rest_current_prices(stale_symbols)
-                    for sym, price in rest_prices.items():
-                        self._on_ws_price(sym, price)
-                            
-                self._last_rest_price = now
+                    self.fb.update_data(f"{self.account_path}/status", status_update)
+                    self._last_balance_check = now
                     
-                # Sync missing stock names for watch list and surge configs
-                all_symbols_for_names = set(symbols)
-                if self.settings.surge_trading.enabled:
-                    all_symbols_for_names.update(self.settings.surge_trading.per_symbol_config.keys())
-                for sym in all_symbols_for_names:
-                    if sym not in self.stock_names:
-                        name = await self._fetch_stock_name(sym)
-                        self.stock_names[sym] = name
+                if self.broker and (now - self._last_rest_price >= 30.0):
+                    symbols = self._get_active_symbols()
+                    stale_symbols = []
+                    for sym in symbols:
+                        hist = self.price_history.get(sym)
+                        if not hist or (now - hist[-1][0] > 25):
+                            stale_symbols.append(sym)
+                    
+                    if stale_symbols:
+                        rest_prices = await self.broker.fetch_rest_current_prices(stale_symbols)
+                        for sym, price in rest_prices.items():
+                            self._on_ws_price(sym, price)
+                                
+                    self._last_rest_price = now
+                        
+                    # Sync missing stock names for watch list and surge configs
+                    all_symbols_for_names = set(symbols)
+                    if self.settings.surge_trading.enabled:
+                        all_symbols_for_names.update(self.settings.surge_trading.per_symbol_config.keys())
+                    for sym in all_symbols_for_names:
+                        if sym not in self.stock_names:
+                            name = await self._fetch_stock_name(sym)
+                            if name:
+                                self.stock_names[sym] = name
+                    
+                if self.settings.is_auto_trading and self.broker:
+                    await self._check_conditional_orders()
+                    await self._check_stop_loss()
+                    await self._check_surge_trading()
+
+                    await self._check_laore_orders()
+            except Exception as e:
+                logger.error(f"[{self.base_path}] _session_loop error: {e}", exc_info=True)
                 
-            if self.settings.is_auto_trading and self.broker:
-                await self._check_conditional_orders()
-                await self._check_stop_loss()
-                await self._check_surge_trading()
-
-                await self._check_laore_orders()
-
             await asyncio.sleep(0.5)
 
     async def _check_conditional_orders(self):
@@ -371,9 +443,9 @@ class UserSession:
                 success, _ = await self.broker.execute_order(order.symbol, order.side, order.quantity, 0.0, order.allow_extended_hours)
                 if success:
                     self.fb.send_push_notification(self.uid, "조건부 주문 체결", f"[{order.symbol}] {order.side} {order.quantity} 주문이 체결되었습니다.")
-                    self.fb.update_data(f"{self.base_path}/conditional_orders/{oid}", {
+                    self.fb.update_data(f"{self.account_path}/conditional_orders/{oid}", {
                         "status": "EXECUTED",
-                        "executed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "executed_at": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
                         "executed_price": price
                     })
                     to_remove.append(oid)
@@ -389,7 +461,7 @@ class UserSession:
             
             if price <= order.trigger_price:
                 qty = 1.0
-                status_data = self.fb.get_data(f"{self.base_path}/status")
+                status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and "holdings" in status_data:
                     holding = status_data["holdings"].get(order.symbol)
                     if holding:
@@ -401,9 +473,9 @@ class UserSession:
                     success, _ = await self.broker.execute_order(order.symbol, "SELL", qty, 0.0, order.allow_extended_hours)
                     if success:
                         self.fb.send_push_notification(self.uid, "자동 손절매 체결", f"[{order.symbol}] SELL {qty} 주문이 체결되었습니다.")
-                        self.fb.update_data(f"{self.base_path}/stop_loss_orders/{oid}", {
+                        self.fb.update_data(f"{self.account_path}/stop_loss_orders/{oid}", {
                             "status": "EXECUTED",
-                            "executed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "executed_at": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
                             "executed_price": price
                         })
                         to_remove.append(oid)
@@ -462,7 +534,7 @@ class UserSession:
                     if 0 <= config_idx < len(configs):
                         del configs[config_idx]
                         dumped = [c.dict() for c in configs]
-                        self.fb.set_data(f"{self.base_path}/settings/surge_trading/per_symbol_config/{symbol}", dumped)
+                        self.fb.set_data(f"{self.account_path}/settings/surge_trading/per_symbol_config/{symbol}", dumped)
                         
             # Wait a bit before checking balance to allow exchange to process the order
             await asyncio.sleep(2.0)
@@ -471,12 +543,14 @@ class UserSession:
     async def _check_laore_orders(self):
         from engine.laore_calculator import calculate_daily_orders
         
-        laore_settings = self.fb.get_data(f"{self.base_path}/laore_settings") or {}
-        if not laore_settings.get("enabled", False): return
+        laore_settings = self.fb.get_data(f"{self.account_path}/laore_settings") or {}
+        if not isinstance(laore_settings, dict): return
         
-        laore_status = self.fb.get_data(f"{self.base_path}/laore_status") or {}
+        laore_status_map = self.fb.get_data(f"{self.account_path}/laore_status") or {}
+        if not isinstance(laore_status_map, dict):
+            laore_status_map = {}
         
-        # 썸머타임 체크
+        # 타임존 체크
         from datetime import datetime
         import pytz
         ny_tz = pytz.timezone('America/New_York')
@@ -485,35 +559,58 @@ class UserSession:
         
         kst = pytz.timezone('Asia/Seoul')
         now_kst = datetime.now(pytz.utc).astimezone(kst)
-        target_hour = 17 if is_summer else 18
-        target_min = 40
+        us_target_hour = 17 if is_summer else 18
+        us_target_min = 40
+        kr_target_hour = 15
+        kr_target_min = 20
         
-        last_exec_date = laore_status.get("last_exec_date", "")
-        current_date_str = now_kst.strftime("%Y-%m-%d")
-        
-        if now_kst.hour == target_hour and now_kst.minute >= target_min and last_exec_date != current_date_str:
-            target_symbol = laore_settings.get("target_symbol")
-            if not target_symbol: return
+        for composite_key, settings in laore_settings.items():
+            if not isinstance(settings, dict) or not settings.get("enabled", False):
+                continue
             
-            # Get latest price
-            prices = await self.broker.fetch_rest_current_prices([target_symbol])
-            current_price = prices.get(target_symbol)
-            if not current_price: return
-            
-            orders = calculate_daily_orders(laore_settings, laore_status, current_price)
-            
-            for buy_ord in orders['buy']:
-                await self.broker.execute_order(target_symbol, "BUY", buy_ord['qty'], buy_ord['price'], False, ord_dvsn="34")
-                import asyncio
-                await asyncio.sleep(0.3)
+            real_symbol = composite_key.split("_", 1)[1] if "_" in composite_key else composite_key
+            active_acc = self.account_data.saved_accounts.get(self.account_data.active_account_id)
+            is_overseas = active_acc.is_overseas if active_acc else False
                 
-            for sell_ord in orders['sell']:
-                await self.broker.execute_order(target_symbol, "SELL", sell_ord['qty'], sell_ord['price'], False, ord_dvsn="34")
-                import asyncio
-                await asyncio.sleep(0.3)
+            target_hour = us_target_hour if is_overseas else kr_target_hour
+            target_min = us_target_min if is_overseas else kr_target_min
+            
+            status = laore_status_map.get(composite_key, {})
+            last_exec_date = status.get("last_exec_date", "")
+            current_date_str = now_kst.strftime("%Y-%m-%d")
+            
+            if now_kst.hour == target_hour and now_kst.minute >= target_min and last_exec_date != current_date_str:
+                current_price = self.price_data.get(real_symbol)
+                if not current_price:
+                    try:
+                        prices = await self.broker.fetch_rest_current_prices([real_symbol])
+                        current_price = prices.get(real_symbol)
+                    except:
+                        pass
+                        
+                if not current_price: continue
                 
-            laore_status["current_round"] = laore_status.get("current_round", 0) + 1
-            laore_status["t_value"] = laore_status.get("t_value", 0.0) + 1.0
-            laore_status["last_exec_date"] = current_date_str
-            self.fb.set_data(f"{self.base_path}/laore_status", laore_status)
+                try:
+                    orders = calculate_daily_orders(settings, status, current_price)
+                except Exception as e:
+                    logger.error(f"Error calculating laore orders for {composite_key}: {e}")
+                    continue
+                
+                if orders['buy'] or orders['sell']:
+                    ord_dvsn = "34" if is_overseas else "03" # 03 is LOC (종가) for KRX, 34 for US
+                    for b_ord in orders['buy']:
+                        await self.broker.execute_order(real_symbol, "BUY", b_ord['qty'], b_ord['price'], False, ord_dvsn=ord_dvsn)
+                        import asyncio
+                        await asyncio.sleep(0.3)
+                    for s_ord in orders['sell']:
+                        await self.broker.execute_order(real_symbol, "SELL", s_ord['qty'], s_ord['price'], False, ord_dvsn=ord_dvsn)
+                        import asyncio
+                        await asyncio.sleep(0.3)
+                    
+                    status['last_exec_date'] = current_date_str
+                    status['current_round'] = status.get("current_round", 0) + 1
+                    status['average_price'] = current_price
+                    status['t_value'] = status.get("t_value", 0.0) + 1.0
+                    status['holding_quantity'] = status.get("holding_quantity", 0.0) + sum([o['qty'] for o in orders['buy']]) - sum([o['qty'] for o in orders['sell']])
+                    self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
 

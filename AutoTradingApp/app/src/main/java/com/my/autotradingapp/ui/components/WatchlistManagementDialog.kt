@@ -27,12 +27,13 @@ fun WatchlistManagementDialog(
     isCrypto: Boolean,
     suggestions: Map<String, String>,
     onDismiss: () -> Unit,
-    onSave: (List<String>) -> Unit
+    onSave: (List<String>, Map<String, String>) -> Unit
 ) {
     var managedList by remember { mutableStateOf(initialSymbols) }
     var searchInput by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var apiSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    val newNamesMap = remember { mutableMapOf<String, String>() }
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -109,7 +110,7 @@ fun WatchlistManagementDialog(
                     } else {
                         // ===== 국내주식: 로컬 KRX 데이터 (우선주 + 네이버 이름 포함) =====
                         try {
-                            val jsonString = context.assets.open("krx_stocks_with_etf.json").bufferedReader().use { it.readText() }
+                            val jsonString = context.assets.open("krx_stocks.json").bufferedReader().use { it.readText() }
                             val jsonArray = org.json.JSONArray(jsonString)
                             
                             for (i in 0 until jsonArray.length()) {
@@ -186,6 +187,14 @@ fun WatchlistManagementDialog(
         }
     }
 
+    val extractName: (String) -> String = { str ->
+        if (str.contains("(")) {
+            str.substringBeforeLast("(").trim().ifEmpty { extractCode(str) }
+        } else {
+            str.trim()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("관심 종목 관리") },
@@ -206,8 +215,10 @@ fun WatchlistManagementDialog(
                             if (searchInput.isNotBlank()) {
                                 val input = searchInput.trim().uppercase()
                                 val inputCode = extractCode(input)
-                                if (!managedList.any { extractCode(it) == inputCode }) {
-                                    managedList = managedList + input
+                                val inputName = extractName(input)
+                                if (!managedList.contains(inputCode)) {
+                                    managedList = managedList + inputCode
+                                    if (inputName != inputCode) newNamesMap[inputCode] = inputName
                                 }
                                 searchInput = ""
                             }
@@ -219,8 +230,10 @@ fun WatchlistManagementDialog(
                             if (searchInput.isNotBlank()) {
                                 val input = searchInput.trim().uppercase()
                                 val inputCode = extractCode(input)
-                                if (!managedList.any { extractCode(it) == inputCode }) {
-                                    managedList = managedList + input
+                                val inputName = extractName(input)
+                                if (!managedList.contains(inputCode)) {
+                                    managedList = managedList + inputCode
+                                    if (inputName != inputCode) newNamesMap[inputCode] = inputName
                                 }
                                 searchInput = ""
                             }
@@ -243,8 +256,10 @@ fun WatchlistManagementDialog(
                                         .fillMaxWidth()
                                         .clickable {
                                             val sugCode = extractCode(suggestion)
-                                            if (!managedList.any { extractCode(it) == sugCode }) {
-                                                managedList = managedList + suggestion
+                                            val sugName = extractName(suggestion)
+                                            if (!managedList.contains(sugCode)) {
+                                                managedList = managedList + sugCode
+                                                if (sugName != sugCode) newNamesMap[sugCode] = sugName
                                             }
                                             searchInput = ""
                                         }
@@ -278,9 +293,13 @@ fun WatchlistManagementDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(managedList.size, key = { index -> managedList[index] }) { index ->
-                            val symbol = managedList[index]
-                            ReorderableItem(reorderableState, key = symbol) { isDragging ->
+                            val itemCode = managedList[index]
+                            ReorderableItem(reorderableState, key = itemCode) { isDragging ->
                                 val elevation by animateDpAsState(if (isDragging) 8.dp else 1.dp)
+                                val fallbackKey = if (isCrypto && !itemCode.startsWith("KRW-")) "KRW-$itemCode" else itemCode
+                                val savedName = suggestions[fallbackKey] ?: itemCode
+                                val displayName = newNamesMap[itemCode] ?: savedName
+
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
                                     elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -292,7 +311,7 @@ fun WatchlistManagementDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = symbol,
+                                            text = if (displayName == itemCode || displayName == fallbackKey) itemCode else "$displayName ($itemCode)",
                                             modifier = Modifier.weight(1f),
                                             fontWeight = FontWeight.Medium
                                         )
@@ -305,7 +324,7 @@ fun WatchlistManagementDialog(
                                             }
                                             IconButton(
                                                 onClick = {
-                                                    managedList = managedList.filter { it != symbol }
+                                                    managedList = managedList.filter { it != itemCode }
                                                 },
                                                 modifier = Modifier.size(32.dp)
                                             ) {
@@ -322,7 +341,7 @@ fun WatchlistManagementDialog(
         },
         confirmButton = {
             Button(onClick = {
-                onSave(managedList)
+                onSave(managedList, newNamesMap)
             }) {
                 Text("저장")
             }

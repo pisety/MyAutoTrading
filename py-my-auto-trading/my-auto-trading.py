@@ -9,11 +9,18 @@ load_dotenv()
 from database.firebase_client import FirebaseClient
 from engine.user_manager import UserManager
 
+from logging.handlers import RotatingFileHandler
+
 # Logging Setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+file_handler = RotatingFileHandler("engine.log", maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
+file_handler.setFormatter(log_formatter)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+
+logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
 logger = logging.getLogger("Main")
 
 async def main():

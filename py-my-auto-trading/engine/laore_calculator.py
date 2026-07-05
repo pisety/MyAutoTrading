@@ -1,12 +1,12 @@
-﻿import math
+import math
 import logging
 
 logger = logging.getLogger("LaoreCalculator")
 
 def calculate_daily_orders(settings, status, current_price):
-    \"\"\"
+    """
     Calculate the daily LOC orders based on the Laore Infinite Buying VR rules.
-    \"\"\"
+    """
     orders = {'buy': [], 'sell': []}
     
     total_budget = settings.get("total_budget", 0)

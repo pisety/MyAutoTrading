@@ -1,4 +1,4 @@
-﻿package com.my.autotradingapp.data
+package com.my.autotradingapp.data
 
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.database.PropertyName
@@ -112,7 +112,6 @@ data class StopLossOrder(
 @IgnoreExtraProperties
 data class LaoreSettings(
     val enabled: Boolean = false,
-    val target_symbol: String = "",
     val total_budget: Double = 0.0,
     val split_count: Int = 40,
     val target_yield_percent: Float = 10.0f
