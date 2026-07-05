@@ -179,6 +179,9 @@ class KISBroker(BaseBroker):
                             avail_cash = float(summary.get("dnca_tot_amt", 0))
                             if avail_cash == 0:
                                 avail_cash = float(summary.get("prvs_rcdl_excc_amt", 0))
+                    else:
+                        logger.error(f"Balance check failed: {data.get('msg1')}")
+                        return None, None, None
                             
                     return (held_value + avail_cash), yield_rate, holdings
         except Exception as e:
