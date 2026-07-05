@@ -307,6 +307,7 @@ class TradingViewModel : ViewModel() {
             }
             val totalBalance = (snapshot.child("total_balance").value as? Number)?.toDouble() ?: 0.0
             val currentYield = (snapshot.child("current_yield").value as? Number)?.toFloat() ?: 0.0f
+            val availCash = (snapshot.child("avail_cash").value as? Number)?.toDouble() ?: 0.0
             val lastUpdated = snapshot.child("last_updated").value as? String ?: ""
             
             val stockPrices = mutableMapOf<String, Double>()
@@ -342,7 +343,7 @@ class TradingViewModel : ViewModel() {
             val authError = snapshot.child("auth_error").value as? String ?: ""
 
             Log.d("TradingApp", "Status Updated at $path")
-            return TradingStatus(totalBalance, currentYield, lastUpdated, stockPrices, stockNames, holdingStocks, authError)
+            return TradingStatus(totalBalance, currentYield, availCash, lastUpdated, stockPrices, stockNames, holdingStocks, authError)
         } catch (e: Exception) {
             Log.e("TradingApp", "Error parsing status: ${e.message}")
             return TradingStatus()

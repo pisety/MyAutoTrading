@@ -583,6 +583,12 @@ fun StockTradingScreen(
                     val currentPriceText = "현재가: ${if (isOverseas) "$" else "₩"}${NumberFormat.getNumberInstance(Locale.US).format(currentPriceNum)}"
                     Text(text = currentPriceText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     
+                    if (command == "BUY" && status.avail_cash > 0 && currentPriceNum > 0) {
+                        val maxQty = status.avail_cash / currentPriceNum
+                        val qtyText = if (maxQty < 1.0) String.format(Locale.US, "%.4f", maxQty) else kotlin.math.floor(maxQty).toInt().toString()
+                        Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    
                     OutlinedTextField(
                         value = orderPrice,
                         onValueChange = { newValue ->
@@ -1488,6 +1494,12 @@ fun CryptoTradingScreen(
                     val currentPriceText = "현재가: ₩${NumberFormat.getNumberInstance(Locale.US).format(currentPriceNum)}"
                     Text(text = currentPriceText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     
+                    if (command == "BUY" && status.avail_cash > 0 && currentPriceNum > 0) {
+                        val maxQty = status.avail_cash / currentPriceNum
+                        val qtyText = if (maxQty < 1.0) String.format(Locale.US, "%.4f", maxQty) else kotlin.math.floor(maxQty).toInt().toString()
+                        Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    
                     OutlinedTextField(
                         value = orderPrice,
                         onValueChange = { newValue ->
@@ -2373,7 +2385,7 @@ fun LaoreSetupDialog(
                         val query = searchInput.lowercase()
                         for (i in 0 until jsonArray.length()) {
                             val item = jsonArray.optJSONObject(i) ?: continue
-                            val sym = item.optString("symbol", "")
+                            val sym = item.optString("symbol", item.optString("code", ""))
                             val name = item.optString("name", "")
                             if (sym.contains(query) || name.lowercase().contains(query)) {
                                 list.add("$name ($sym)")
@@ -2398,7 +2410,7 @@ fun LaoreSetupDialog(
             } else {
                 val query = searchInput.lowercase()
                 suggestions.filter {
-                    it.key.lowercase().contains(query) || it.value.lowercase().contains(query)
+                    it.key.isNotBlank() && (it.key.lowercase().contains(query) || it.value.lowercase().contains(query))
                 }.map { "${it.value} (${it.key})" }.toList()
             }
         }

@@ -174,19 +174,22 @@ class KISBroker(BaseBroker):
                                 held_value = float(summary.get("tot_evlu_pamt", 0))
                                 yield_rate = float(summary.get("evlu_erng_rt1", 0))
                             avail_cash = float(summary.get("frcr_drwg_psbl_amt_1", summary.get("frcr_use_psbl_amt", 0)))
+                            total_balance = held_value + avail_cash
                         else:
-                            held_value = float(summary.get("tot_evlu_amt", summary.get("scts_evlu_amt", 0)))
+                            total_balance = float(summary.get("tot_evlu_amt", 0))
                             avail_cash = float(summary.get("dnca_tot_amt", 0))
                             if avail_cash == 0:
                                 avail_cash = float(summary.get("prvs_rcdl_excc_amt", 0))
+                            if total_balance == 0:
+                                total_balance = float(summary.get("scts_evlu_amt", 0)) + avail_cash
                     else:
                         logger.error(f"Balance check failed: {data.get('msg1')}")
-                        return None, None, None
+                        return None, None, None, None
                             
-                    return (held_value + avail_cash), yield_rate, holdings
+                    return total_balance, yield_rate, avail_cash, holdings
         except Exception as e:
             logger.error(f"Balance check error: {e}")
-            return None, None, None
+            return None, None, None, None
 
     async def execute_order(self, symbol: str, side: str, qty: float, price: float, allow_extended_hours: bool = False, ord_dvsn: str = None) -> Tuple[bool, str]:
         if not await self.ensure_valid_token():
@@ -245,15 +248,24 @@ class KISBroker(BaseBroker):
                                     break # 시간 관련 에러가 아니면 즉시 실패 (예: 잔고부족)
                 else:
                     url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
-                    # 가격이 0 이하이면 시장가(01), 아니면 지정가(00)
-                    ord_dvsn = "01" if price <= 0 else "00"
-                    ord_unpr = "0" if price <= 0 else str(int(price))
+                    def _round_to_tick(p_val: float) -> int:
+                        p = int(p_val)
+                        if p < 2000: return p
+                        elif p < 5000: return p - (p % 5)
+                        elif p < 20000: return p - (p % 10)
+                        elif p < 50000: return p - (p % 50)
+                        elif p < 200000: return p - (p % 100)
+                        elif p < 500000: return p - (p % 500)
+                        else: return p - (p % 1000)
+
+                    actual_dvsn = ord_dvsn if ord_dvsn else ("01" if price <= 0 else "00")
+                    ord_unpr = "0" if actual_dvsn in ["01", "03"] else str(_round_to_tick(price))
                     
                     body = {
                         "CANO": self.account_number,
                         "ACNT_PRDT_CD": self.acnt_prdt_cd,
                         "PDNO": symbol.strip(),
-                        "ORD_DVSN": ord_dvsn,
+                        "ORD_DVSN": actual_dvsn,
                         "ORD_QTY": str(int(qty)),
                         "ORD_UNPR": ord_unpr
                     }

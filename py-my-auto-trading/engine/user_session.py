@@ -1,4 +1,4 @@
-import time
+﻿import time
 import asyncio
 import logging
 import aiohttp
@@ -362,11 +362,11 @@ class UserSession:
                     last_sync = now
                     
                 if self.broker and now - self._last_balance_check > 30.0:
-                    bal, yld, holdings = await self.broker.get_balance()
+                    bal, yld, avail_cash, holdings = await self.broker.get_balance()
                     status_update = {}
                     if bal is not None:
                         status_update["total_balance"] = float(bal)
-                        status_update["current_yield"] = float(yld) if yld else 0.0
+                        status_update["current_yield"] = float(yld) if yld else 0.0`n                          status_update["avail_cash"] = float(avail_cash) if avail_cash else 0.0
                         
                         holdings_data = {}
                         if holdings:
@@ -597,20 +597,39 @@ class UserSession:
                     continue
                 
                 if orders['buy'] or orders['sell']:
-                    ord_dvsn = "34" if is_overseas else "03" # 03 is LOC (종가) for KRX, 34 for US
+                    active_acc = self.account_data.saved_accounts.get(self.account_data.active_account_id)
+                    is_mock = active_acc.is_mock if active_acc else False
+                    ord_dvsn = "00" if is_mock else ("34" if is_overseas else "03") # 03 is LOC (종가) for KRX, 34 for US
+
+                    successful_buy_qty = 0.0
+                    successful_sell_qty = 0.0
+                    any_success = False
+
                     for b_ord in orders['buy']:
-                        await self.broker.execute_order(real_symbol, "BUY", b_ord['qty'], b_ord['price'], False, ord_dvsn=ord_dvsn)
+                        success, msg = await self.broker.execute_order(real_symbol, "BUY", b_ord['qty'], b_ord['price'], False, ord_dvsn=ord_dvsn)
+                        if success:
+                            successful_buy_qty += b_ord['qty']
+                            any_success = True
+                        else:
+                            logger.warning(f"Laore BUY failed for {real_symbol}: {msg}")
                         import asyncio
                         await asyncio.sleep(0.3)
                     for s_ord in orders['sell']:
-                        await self.broker.execute_order(real_symbol, "SELL", s_ord['qty'], s_ord['price'], False, ord_dvsn=ord_dvsn)
+                        success, msg = await self.broker.execute_order(real_symbol, "SELL", s_ord['qty'], s_ord['price'], False, ord_dvsn=ord_dvsn)
+                        if success:
+                            successful_sell_qty += s_ord['qty']
+                            any_success = True
+                        else:
+                            logger.warning(f"Laore SELL failed for {real_symbol}: {msg}")
                         import asyncio
                         await asyncio.sleep(0.3)
                     
-                    status['last_exec_date'] = current_date_str
-                    status['current_round'] = status.get("current_round", 0) + 1
-                    status['average_price'] = current_price
-                    status['t_value'] = status.get("t_value", 0.0) + 1.0
-                    status['holding_quantity'] = status.get("holding_quantity", 0.0) + sum([o['qty'] for o in orders['buy']]) - sum([o['qty'] for o in orders['sell']])
-                    self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
-
+                    if any_success:
+                        status['last_exec_date'] = current_date_str
+                        status['current_round'] = status.get("current_round", 0) + 1
+                        status['average_price'] = current_price
+                        status['t_value'] = status.get("t_value", 0.0) + 1.0
+                        status['holding_quantity'] = status.get("holding_quantity", 0.0) + successful_buy_qty - successful_sell_qty
+                        self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
+                    else:
+                        logger.info(f"Laore skipped updating status for {composite_key} because all orders failed.")

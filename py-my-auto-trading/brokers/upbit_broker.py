@@ -95,21 +95,22 @@ class UpbitBroker(BaseBroker):
             logger.error(f"Upbit auth check error: {e}")
         return False
 
-    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[List[Dict]]]:
-        """업비트 계좌 잔고 조회. (total_balance, yield_rate, holdings) 반환."""
+    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[List[Dict]]]:
+        """업비트 계좌 잔고 조회. (total_balance, yield_rate, avail_cash, holdings) 반환."""
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{self.base_url}/accounts"
                 async with session.get(url, headers=self._auth_headers(), timeout=aiohttp.ClientTimeout(total=10)) as res:
                     if res.status != 200:
                         logger.error(f"Upbit balance error ({res.status}): {await res.text()}")
-                        return None, None, None
+                        return None, None, None, None
                     accounts = await res.json()
 
             if not isinstance(accounts, list):
-                return None, None, None
+                return None, None, None, None
 
             krw_balance = 0.0
+            avail_cash = 0.0
             coin_entries = []
 
             for entry in accounts:
@@ -120,6 +121,7 @@ class UpbitBroker(BaseBroker):
 
                 if currency == "KRW":
                     krw_balance = balance + locked
+                    avail_cash = balance
                 elif balance > 0 or locked > 0:
                     coin_entries.append({
                         "currency": currency,
@@ -171,11 +173,11 @@ class UpbitBroker(BaseBroker):
             total_balance = krw_balance + total_eval
             overall_yield = ((total_eval - total_purchase) / total_purchase * 100) if total_purchase > 0 else 0.0
 
-            return round(total_balance, 2), round(overall_yield, 2), holdings
+            return round(total_balance, 2), round(overall_yield, 2), round(avail_cash, 2), holdings
 
         except Exception as e:
             logger.error(f"Upbit get_balance error: {e}")
-            return None, None, None
+            return None, None, None, None
 
     async def _fetch_ticker_prices(self, markets: List[str]) -> Dict[str, float]:
         """내부 헬퍼: GET /v1/ticker 로 여러 마켓의 현재가를 한 번에 조회. 상장폐지 코인 포함 시 404 에러 폴백 처리."""

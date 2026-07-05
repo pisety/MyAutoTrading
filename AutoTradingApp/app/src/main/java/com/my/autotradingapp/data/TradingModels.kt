@@ -38,6 +38,7 @@ data class HoldingStock(
 data class TradingStatus(
     val total_balance: Double = 0.0,
     val current_yield: Float = 0.0f,
+    val avail_cash: Double = 0.0,
     val last_updated: String = "",
     val stock_prices: Map<String, Double> = emptyMap(),
     val stock_names: Map<String, String> = emptyMap(),

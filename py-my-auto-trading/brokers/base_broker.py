@@ -16,8 +16,8 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[List[Dict[str, Any]]]]:
-        """계좌 잔고 조회. (total_balance, current_yield, holdings) 반환"""
+    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[List[Dict[str, Any]]]]:
+        """계좌 잔고 조회. (total_balance, current_yield, avail_cash, holdings) 반환"""
         pass
 
     @abstractmethod

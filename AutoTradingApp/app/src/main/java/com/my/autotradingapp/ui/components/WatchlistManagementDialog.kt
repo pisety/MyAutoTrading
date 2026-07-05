@@ -170,7 +170,7 @@ fun WatchlistManagementDialog(
                 val query = searchInput.lowercase()
                 suggestions.entries.filter { (code, name) ->
                     val cleanCode = code.removePrefix("KRW-")
-                    name.lowercase().contains(query) || cleanCode.lowercase().contains(query)
+                    cleanCode.isNotBlank() && (name.lowercase().contains(query) || cleanCode.lowercase().contains(query))
                 }.map { (code, name) ->
                     val cleanCode = code.removePrefix("KRW-")
                     "$name ($cleanCode)"
@@ -216,7 +216,7 @@ fun WatchlistManagementDialog(
                                 val input = searchInput.trim().uppercase()
                                 val inputCode = extractCode(input)
                                 val inputName = extractName(input)
-                                if (!managedList.contains(inputCode)) {
+                                if (inputCode.isNotBlank() && !managedList.contains(inputCode)) {
                                     managedList = managedList + inputCode
                                     if (inputName != inputCode) newNamesMap[inputCode] = inputName
                                 }
@@ -231,7 +231,7 @@ fun WatchlistManagementDialog(
                                 val input = searchInput.trim().uppercase()
                                 val inputCode = extractCode(input)
                                 val inputName = extractName(input)
-                                if (!managedList.contains(inputCode)) {
+                                if (inputCode.isNotBlank() && !managedList.contains(inputCode)) {
                                     managedList = managedList + inputCode
                                     if (inputName != inputCode) newNamesMap[inputCode] = inputName
                                 }
