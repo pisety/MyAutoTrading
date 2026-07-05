@@ -1,4 +1,4 @@
-﻿import time
+import time
 import asyncio
 import logging
 import aiohttp
@@ -366,7 +366,8 @@ class UserSession:
                     status_update = {}
                     if bal is not None:
                         status_update["total_balance"] = float(bal)
-                        status_update["current_yield"] = float(yld) if yld else 0.0`n                          status_update["avail_cash"] = float(avail_cash) if avail_cash else 0.0
+                        status_update["current_yield"] = float(yld) if yld else 0.0
+                        status_update["avail_cash"] = float(avail_cash) if avail_cash else 0.0
                         
                         holdings_data = {}
                         if holdings:

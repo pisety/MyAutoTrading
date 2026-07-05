@@ -583,10 +583,13 @@ fun StockTradingScreen(
                     val currentPriceText = "현재가: ${if (isOverseas) "$" else "₩"}${NumberFormat.getNumberInstance(Locale.US).format(currentPriceNum)}"
                     Text(text = currentPriceText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     
-                    if (command == "BUY" && status.avail_cash > 0 && currentPriceNum > 0) {
-                        val maxQty = status.avail_cash / currentPriceNum
-                        val qtyText = if (maxQty < 1.0) String.format(Locale.US, "%.4f", maxQty) else kotlin.math.floor(maxQty).toInt().toString()
-                        Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    if (command == "BUY" && status.avail_cash >= 0) {
+                        val parsedOrderPrice = orderPrice.replace(",", "").toDoubleOrNull() ?: currentPriceNum
+                        if (parsedOrderPrice > 0) {
+                            val maxQty = status.avail_cash / parsedOrderPrice
+                            val qtyText = if (maxQty < 1.0) "0" else kotlin.math.floor(maxQty).toInt().toString()
+                            Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
                     }
                     
                     OutlinedTextField(
@@ -1494,10 +1497,16 @@ fun CryptoTradingScreen(
                     val currentPriceText = "현재가: ₩${NumberFormat.getNumberInstance(Locale.US).format(currentPriceNum)}"
                     Text(text = currentPriceText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     
-                    if (command == "BUY" && status.avail_cash > 0 && currentPriceNum > 0) {
-                        val maxQty = status.avail_cash / currentPriceNum
-                        val qtyText = if (maxQty < 1.0) String.format(Locale.US, "%.4f", maxQty) else kotlin.math.floor(maxQty).toInt().toString()
-                        Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    if (command == "BUY" && status.avail_cash >= 0) {
+                        val parsedOrderPrice = orderPrice.replace(",", "").toDoubleOrNull() ?: currentPriceNum
+                        if (parsedOrderPrice > 0) {
+                            val maxQty = status.avail_cash / parsedOrderPrice
+                            val qtyText = if (maxQty == 0.0) "0" else {
+                                val s = String.format(Locale.US, "%.4f", maxQty).trimEnd('0')
+                                if (s.endsWith(".")) s.dropLast(1) else s
+                            }
+                            Text(text = "주문 가능 수량: 약 $qtyText", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
                     }
                     
                     OutlinedTextField(
