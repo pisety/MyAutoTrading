@@ -63,6 +63,15 @@ flowchart TD
 - 앱에서 버튼을 눌러 즉각적으로 매수/매도/손절 주문을 서버로 쏘아 올립니다.
 - Firebase의 `/commands` 경로에 주문 데이터(종목, 가격, 수량, 종류)가 Push되며, Python 서버가 이 경로를 리스닝하다가 새로운 명령이 들어오면 증권사 API를 통해 실제 주문을 실행하고 로그를 남긴 뒤 해당 명령을 데이터베이스에서 삭제(소모)합니다.
 
+### 2.3 장전 시간외 매수 주문예약 관리 (Pre-market Order Reservation)
+- **개념:** 정규장 개시 전 또는 시간외 매수를 위해 사용자가 지정한 시간(예: 08:30)에 특정 종목 매수 주문을 자동으로 전송하는 스케줄링 시스템입니다.
+- **아키텍처:** 클라이언트가 `/reservations` 경로에 예약 정보를 저장하면, 엔진 내부의 `ReservationManager`(`engine/reservation_manager.py`)가 10초 주기로 도달 여부를 감시하여 지정 시간에 증권사 매수 주문 API를 실행합니다.
+- **예약 취소 로직:** 앱에서 예약 삭제 시 DB 대기열 및 메모리에서 즉시 소멸되나, 이미 증권사로 전송 완료된 거래소 체결 대기 주문은 취소되지 않도록 명확한 책임 분리가 되어 있습니다.
+
+### 2.4 라오어 무한매수법 대시보드 및 실시간 잔고 동기화 (Laore Dashboard & Balance Sync)
+- **평단가 vs 현재가 비교:** `MainActivity.kt`의 무한매수 카드 레이아웃에 실제 보유 평단가와 시장 실시간 현재가를 나란히 배치하여 즉각적인 손익 및 단가 비교를 제공합니다.
+- **실계좌 잔고 동기화:** `user_session.py`의 `_run_laore_schedule` 루프가 실행될 때 국내 주식 및 코인 계좌의 실잔고(`get_balance`)를 1:1로 조회하여 `laore_status`의 평단가와 보유수량을 실제 계좌 잔고 데이터와 동기화합니다.
+
 ---
 
 ## 3. 폴더 및 파일 구조 (Directory Structure)
@@ -76,6 +85,8 @@ flowchart TD
 - **`my-auto-trading.py` (엔트리 포인트):** 메인 실행 파일이며, 로거(Logger) 세팅 및 모든 백그라운드 루프(asyncio.gather)를 실행시킵니다.
 - **`engine/user_manager.py`:** 다중 사용자 세션을 관리합니다. Firebase의 `users` 경로를 리스닝하여 사용자별 주식/코인 세션을 자동으로 생성하고 파괴합니다. 하위 경로 삭제 시 세션이 잘못 종료되지 않도록 보호 로직이 포함되어 있습니다.
 - **`engine/user_session.py`:** Firebase와의 통신을 전담하며, 상태(Status)를 업데이트하거나 앱에서 넘어오는 명령(Commands)과 설정(Settings)을 콜백으로 받아 처리합니다.
+- **`engine/reservation_manager.py`:** 장전 시간외 매수 주문예약 데이터를 감시하고 도달 시점에 자동 매수 주문을 발주하는 스케줄러 모듈입니다.
+- **`engine/etf_analyzer.py`:** 미국/국내 대표 ETF(TIGER 미국테크TOP10 등) 구성 종목 및 비중 정보를 분석하고 크롤링/가공하는 데이터 모듈입니다.
 - **`brokers/kis_broker.py`:** 한국투자증권(KIS) REST API 래퍼. 토큰 캐싱(`.kis_token_*.json`)을 지원하여 계좌 전환 시 재인증 지연을 방지합니다.
 - **`brokers/kiwoom_broker.py`:** 키움증권 REST API 래퍼. 실전/모의 투자 도메인 자동 분기(`api.kiwoom.com` / `mockapi.kiwoom.com`), 잔고조회(`kt00004`, `kt00018`), 주문(`kt10000`, `kt10001`), 웹소켓 실시간 시세(`0B`) 지원.
 - **`brokers/upbit_broker.py`:** Upbit 코인 거래소 API 래퍼. 웹소켓을 통한 실시간 체결가 수신을 지원합니다.
