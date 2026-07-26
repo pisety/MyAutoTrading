@@ -626,6 +626,22 @@ class UserSession:
                     else:
                         status["holding_quantity"] = 0.0
                         status["average_price"] = 0.0
+
+                split_cnt = settings.get("split_count", 40)
+                cur_round = status.get("current_round", 0)
+                if status.get("holding_quantity", 0.0) <= 0 or status.get("average_price", 0.0) <= 0:
+                    status["current_round"] = 0
+                    status["current_mode"] = "일반 모드(전반전)"
+                else:
+                    if cur_round > split_cnt and split_cnt > 0:
+                        cur_round = split_cnt
+                        status["current_round"] = cur_round
+                    if cur_round >= split_cnt and split_cnt > 0:
+                        status["current_mode"] = "원금소진(매도대기)"
+                    elif cur_round >= (split_cnt / 2):
+                        status["current_mode"] = "일반 모드(후반전)"
+                    else:
+                        status["current_mode"] = "일반 모드(전반전)"
                 
                 try:
                     orders = calculate_daily_orders(settings, status, current_price, self.service_type)
@@ -698,12 +714,25 @@ class UserSession:
                             status['current_round'] = 0
                             status['t_value'] = 0.0
                             status['holding_quantity'] = 0.0
+                            status['current_mode'] = "일반 모드(전반전)"
                         else:
                             if successful_buy_qty > 0:
                                 status['average_price'] = ((old_qty * old_avg) + total_buy_cost) / (old_qty + successful_buy_qty)
-                            status['current_round'] = status.get("current_round", 0) + 1
-                            status['t_value'] = status.get("t_value", 0.0) + 1.0
+                                status['current_round'] = status.get("current_round", 0) + 1
+                                status['t_value'] = status.get("t_value", 0.0) + 1.0
                             status['holding_quantity'] = new_qty
+                            
+                            split_cnt = settings.get("split_count", 40)
+                            cur_round = status.get("current_round", 0)
+                            if cur_round > split_cnt and split_cnt > 0:
+                                cur_round = split_cnt
+                                status['current_round'] = cur_round
+                            if cur_round >= split_cnt and split_cnt > 0:
+                                status['current_mode'] = "원금소진(매도대기)"
+                            elif cur_round >= (split_cnt / 2):
+                                status['current_mode'] = "일반 모드(후반전)"
+                            else:
+                                status['current_mode'] = "일반 모드(전반전)"
                             
                         status['last_exec_date'] = current_date_str
                         status['last_exec_timestamp'] = time.time()

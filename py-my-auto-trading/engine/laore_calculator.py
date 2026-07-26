@@ -70,6 +70,10 @@ def calculate_daily_orders(settings, status, current_price, service_type="stock"
             'type': order_type
         })
         
+    if current_round >= split_count and split_count > 0:
+        # 분할 매수 횟수(예: 20회) 100% 도달 시: 추가 자금 소진을 막기 위해 매수 주문은 중단하고 목표 매도(익절) 주문만 반환
+        return orders
+        
     if is_crypto:
         min_order_value = 5050.0 # 여유분 포함
         
