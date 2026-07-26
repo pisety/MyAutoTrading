@@ -125,9 +125,9 @@ fun WatchlistManagementDialog(
                             e.printStackTrace()
                         }
 
-                        // 6자리 숫자 코드 직접 입력 시 네이버 API로 종목명 조회
+                        // 6자리 숫자/영문 코드 직접 입력 시 네이버 API로 종목명 조회
                         val trimmed = searchInput.trim()
-                        if (trimmed.length == 6 && trimmed.all { it.isDigit() } && !list.any { it.contains("($trimmed)") }) {
+                        if (trimmed.length == 6 && !list.any { it.contains("($trimmed)") }) {
                             try {
                                 val apiUrl = java.net.URL("https://m.stock.naver.com/api/stock/$trimmed/basic")
                                 val conn = apiUrl.openConnection() as java.net.HttpURLConnection

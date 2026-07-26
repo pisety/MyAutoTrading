@@ -47,6 +47,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.firebase.messaging.FirebaseMessaging
 import com.my.autotradingapp.ui.components.WatchlistManagementDialog
+import com.my.autotradingapp.ui.components.ReservationManagementDialog
 
 fun formatIsoTimeKst(isoTime: String): String {
     try {
@@ -520,12 +521,44 @@ fun StockTradingScreen(
     val isOverseas = activeAcc?.is_overseas ?: true
     val isMock = activeAcc?.is_mock ?: true
     val brokerName = activeAcc?.broker ?: "설정안됨"
-    
+    val isKisRealDomestic = (brokerName == "한국투자" || brokerName == "한국투자증권") && !isMock && !isOverseas
+    var showReservationDialog by remember { mutableStateOf(false) }
+    val reservationOrders by viewModel.reservationOrders.collectAsState()
     val suggestions = status.stock_names
+
+    if (showReservationDialog) {
+        ReservationManagementDialog(
+            reservationOrders = reservationOrders,
+            suggestions = suggestions,
+            stockPrices = status.stock_prices,
+            onDismiss = { showReservationDialog = false },
+            onAddOrder = { sym, name, qty, enabled, thresh ->
+                viewModel.sendReservationOrder(sym, name, qty, enabled, thresh)
+                Toast.makeText(context, "장전시간외 예약주문 설정 완료", Toast.LENGTH_SHORT).show()
+            },
+            onCancelOrder = { id ->
+                viewModel.cancelReservationOrder(id)
+                Toast.makeText(context, "주문 취소 요청을 전송했습니다.", Toast.LENGTH_SHORT).show()
+            },
+            onToggleAutoCancel = { id, cur ->
+                viewModel.toggleReservationAutoCancel(id, cur)
+                Toast.makeText(context, "자동취소 설정을 변경했습니다.", Toast.LENGTH_SHORT).show()
+            },
+            onDeleteOrder = { id ->
+                viewModel.deleteReservationOrder(id)
+                Toast.makeText(context, "예약주문 내역을 삭제했습니다.", Toast.LENGTH_SHORT).show()
+            },
+            onRestartOrder = { id ->
+                viewModel.restartReservationOrder(id)
+                Toast.makeText(context, "예약주문을 다시 활성화했습니다.", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+    
     var showWatchlistDialog by remember { mutableStateOf(false) }
 
     if (showWatchlistDialog) {
-        val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.all { it.isDigit() } else sym.all { it.isDigit() } }
+        val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.any { it.isDigit() } else sym.any { it.isDigit() } }
         WatchlistManagementDialog(
             initialSymbols = filteredWatchSymbols.entries.sortedBy { it.value.order }.map { (code, _) ->
                 val name = status.stock_names[code] ?: suggestions[code]
@@ -735,7 +768,7 @@ fun StockTradingScreen(
         )
     }
 
-    val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.all { it.isDigit() } else sym.all { it.isDigit() } }
+    val filteredWatchSymbols = settings.watch_symbols.filterKeys { sym -> if (isOverseas) !sym.any { it.isDigit() } else sym.any { it.isDigit() } }
     val watchSymbolsList = filteredWatchSymbols.entries.sortedBy { it.value.order }.map { it.key }
 
     var showSurgeDialog by remember { mutableStateOf(false) }
@@ -1079,24 +1112,46 @@ fun StockTradingScreen(
         }
 
         item {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            if (isKisRealDomestic) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("🕒 장전시간외 주문예약 관리", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
+                    Text("${reservationOrders.size}건 등록중", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+                Button(
+                    onClick = { showReservationDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("🚀 장전시간외 매수 주문예약 설정", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = "자동매매 엔진 가동", fontWeight = FontWeight.Bold)
+                Text(text = "⚡ 자동매매 엔진 가동", fontWeight = FontWeight.Bold)
                 Switch(
                     checked = settings.is_auto_trading,
                     onCheckedChange = { viewModel.toggleAutoTrading(it, "stock") }
                 )
             }
             if (settings.is_auto_trading) {
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedButton(
                     onClick = { showSurgeDialog = true },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("급등주 단타 감시 설정 (${if (settings.surge_trading.enabled) "ON" else "OFF"})")
+                    Text("🔥 급등주 단타 감시 설정 (${if (settings.surge_trading.enabled) "ON" else "OFF"})", fontWeight = FontWeight.Bold)
                 }
                 
                 if (settings.surge_trading.enabled) {
@@ -1978,24 +2033,27 @@ fun CryptoTradingScreen(
         }
 
         item {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = "자동매매 엔진 가동", fontWeight = FontWeight.Bold)
+                Text(text = "⚡ 자동매매 엔진 가동", fontWeight = FontWeight.Bold)
                 Switch(
                     checked = settings.is_auto_trading,
                     onCheckedChange = { viewModel.toggleAutoTrading(it, "crypto") }
                 )
             }
             if (settings.is_auto_trading) {
+                Spacer(modifier = Modifier.height(6.dp))
                 OutlinedButton(
                     onClick = { showSurgeDialog = true },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
                 ) {
-                    Text("급등 코인 감시 설정 (${if (settings.surge_trading.enabled) "ON" else "OFF"})")
+                    Text("🔥 급등 코인 감시 설정 (${if (settings.surge_trading.enabled) "ON" else "OFF"})", fontWeight = FontWeight.Bold)
                 }
                 
                 if (settings.surge_trading.enabled) {
@@ -2194,22 +2252,39 @@ fun Modifier.mouseScroll(state: LazyListState): Modifier = composed {
 fun LaoreTabContent(viewModel: TradingViewModel) {
     var showAccountSetup by remember { mutableStateOf(false) }
     var showSetupDialog by remember { mutableStateOf(false) }
+    var selectedServiceType by remember { mutableStateOf("stock") } // "stock" or "crypto"
+    var deleteCandidate by remember { mutableStateOf<String?>(null) }
     
     if (showAccountSetup) {
-        StockAccountSetupScreen(
-            onDismiss = { showAccountSetup = false },
-            viewModel = viewModel
-        )
+        if (selectedServiceType == "stock") {
+            StockAccountSetupScreen(onDismiss = { showAccountSetup = false }, viewModel = viewModel)
+        } else {
+            CryptoAccountSetupScreen(onDismiss = { showAccountSetup = false }, viewModel = viewModel)
+        }
         return
     }
 
-    val settingsMap by viewModel.laoreSettings.collectAsState()
-    val statusMap by viewModel.laoreStatus.collectAsState()
-    val stockStatus by viewModel.stockStatus.collectAsState(); val suggestions = stockStatus.stock_names
-    val activeAcc = viewModel.stockAccountData.collectAsState().value.saved_accounts[
-        viewModel.stockAccountData.collectAsState().value.active_account_id
-    ]
-    val isOverseas = activeAcc?.is_overseas ?: true
+    val settingsMap by if (selectedServiceType == "stock") viewModel.laoreSettings.collectAsState() else viewModel.cryptoLaoreSettings.collectAsState()
+    val statusMap by if (selectedServiceType == "stock") viewModel.laoreStatus.collectAsState() else viewModel.cryptoLaoreStatus.collectAsState()
+    
+    val suggestions = if (selectedServiceType == "stock") {
+        viewModel.stockStatus.collectAsState().value.stock_names
+    } else {
+        viewModel.cryptoStatus.collectAsState().value.stock_names
+    }
+
+    val activeAcc = if (selectedServiceType == "stock") {
+        viewModel.stockAccountData.collectAsState().value.saved_accounts[viewModel.stockAccountData.collectAsState().value.active_account_id]
+    } else {
+        viewModel.cryptoAccountData.collectAsState().value.saved_accounts[viewModel.cryptoAccountData.collectAsState().value.active_account_id]
+    }
+    val isOverseas = if (selectedServiceType == "stock") activeAcc?.is_overseas ?: true else false
+
+    val fullStatus = if (selectedServiceType == "stock") {
+        viewModel.stockStatus.collectAsState().value
+    } else {
+        viewModel.cryptoStatus.collectAsState().value
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -2225,6 +2300,14 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                     Text("앱계좌 설정")
                 }
             }
+        }
+        
+        item {
+            TabRow(selectedTabIndex = if (selectedServiceType == "stock") 0 else 1) {
+                Tab(selected = selectedServiceType == "stock", onClick = { selectedServiceType = "stock" }, text = { Text("주식") })
+                Tab(selected = selectedServiceType == "crypto", onClick = { selectedServiceType = "crypto" }, text = { Text("코인") })
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
         
         item {
@@ -2245,6 +2328,16 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                 val status = statusMap[compositeKey] ?: com.my.autotradingapp.data.LaoreStatus()
                 val name = suggestions[symbol] ?: symbol
                 
+                val holding = fullStatus.holding_stocks[symbol]
+                val currentPrice = fullStatus.stock_prices[symbol] ?: (holding?.current_price ?: 0.0)
+                val effectiveAvgPrice = if (holding != null && holding.avg_price > 0.0) holding.avg_price else status.average_price
+                val effectiveQty = if (holding != null && holding.avg_price > 0.0) holding.quantity else status.holding_quantity
+                val currentYield = if (currentPrice > 0 && effectiveAvgPrice > 0) {
+                    (currentPrice - effectiveAvgPrice) / effectiveAvgPrice * 100
+                } else {
+                    0.0
+                }
+                
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -2258,7 +2351,7 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                             Switch(
                                 checked = setting.enabled,
                                 onCheckedChange = { isChecked ->
-                                    viewModel.saveLaoreSetting(compositeKey, setting.copy(enabled = isChecked))
+                                    viewModel.saveLaoreSetting(compositeKey, setting.copy(enabled = isChecked), selectedServiceType)
                                 }
                             )
                         }
@@ -2271,13 +2364,37 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("평단가: ${if(isOverseas) "$" else "￦"}${String.format(java.util.Locale.US, "%.2f", status.average_price)}", style = MaterialTheme.typography.bodyMedium)
-                            Text("보유수량: ${String.format(java.util.Locale.US, "%.4f", status.holding_quantity)}", style = MaterialTheme.typography.bodyMedium)
+                            val avgPriceText = if (isOverseas) {
+                                "$${String.format(java.util.Locale.US, "%,.2f", effectiveAvgPrice)}"
+                            } else {
+                                "₩${String.format(java.util.Locale.US, "%,.0f", effectiveAvgPrice)}"
+                            }
+                            val curPriceText = if (isOverseas) {
+                                "$${String.format(java.util.Locale.US, "%,.2f", currentPrice)}"
+                            } else {
+                                "₩${String.format(java.util.Locale.US, "%,.0f", currentPrice)}"
+                            }
+                            Text("평단가: $avgPriceText", style = MaterialTheme.typography.bodyMedium)
+                            Text("현재가: $curPriceText", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("투자자금: ${if(isOverseas) "$" else "￦"}${String.format(java.util.Locale.US, "%,.0f", setting.total_budget)}", style = MaterialTheme.typography.bodyMedium)
+                            val qtyText = if (selectedServiceType == "stock") {
+                                "${String.format(java.util.Locale.US, "%,.0f", effectiveQty)}주"
+                            } else {
+                                String.format(java.util.Locale.US, "%,.4f", effectiveQty)
+                            }
+                            Text("보유수량: $qtyText", style = MaterialTheme.typography.bodyMedium)
+                            Text("투자자금: ${if(isOverseas) "$" else "₩"}${String.format(java.util.Locale.US, "%,.0f", setting.total_budget)}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("목표수익률: ${setting.target_yield_percent}%", style = MaterialTheme.typography.bodyMedium)
+                            val yieldColor = if (currentYield > 0) Color.Red else if (currentYield < 0) Color.Blue else Color.Black
+                            val sign = if (currentYield > 0) "+" else ""
+                            Text("현재수익률: $sign${String.format(java.util.Locale.US, "%.2f", currentYield)}%", 
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = yieldColor)
                         }
                         
                         if (status.status_message.isNotEmpty()) {
@@ -2286,7 +2403,7 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                         }
                         
                         Row(modifier = Modifier.fillMaxWidth().padding(top=8.dp), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { viewModel.removeLaoreSetting(compositeKey) }) {
+                            TextButton(onClick = { deleteCandidate = compositeKey }) {
                                 Text("삭제/종료", color = Color.Red)
                             }
                         }
@@ -2309,10 +2426,11 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
         LaoreSetupDialog(
             isOverseas = isOverseas,
             suggestions = suggestions,
+            serviceType = selectedServiceType,
             onDismiss = { showSetupDialog = false },
-            onSave = { symbol, name, budget, split, yield ->
+            onSave = { symbol, name, budget, split, yield, intervalHours ->
                 if (name.isNotEmpty() && name != symbol) {
-                    viewModel.updateStockName(symbol, name)
+                    viewModel.updateStockName(symbol, name, selectedServiceType)
                 }
                 
                 val existingSets = settingsMap.keys.filter { it.endsWith("_$symbol") }
@@ -2328,9 +2446,34 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
                     enabled = true,
                     total_budget = budget,
                     split_count = split,
-                    target_yield_percent = yield
-                ))
+                    target_yield_percent = yield,
+                    interval_hours = intervalHours
+                ), selectedServiceType)
                 showSetupDialog = false
+            }
+        )
+    }
+
+    if (deleteCandidate != null) {
+        AlertDialog(
+            onDismissRequest = { deleteCandidate = null },
+            title = { Text("무한매수 세트 삭제") },
+            text = { Text("정말 삭제하시겠습니까?\n삭제 시 해당 세트의 매수가 중지되고 리스트에서 영구히 삭제됩니다.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.removeLaoreSetting(deleteCandidate!!, selectedServiceType)
+                        deleteCandidate = null
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("삭제")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteCandidate = null }) {
+                    Text("취소")
+                }
             }
         )
     }
@@ -2340,8 +2483,10 @@ fun LaoreTabContent(viewModel: TradingViewModel) {
 fun LaoreSetupDialog(
     isOverseas: Boolean,
     suggestions: Map<String, String>,
+    cryptoSuggestions: Map<String, String> = emptyMap(),
+    serviceType: String = "stock",
     onDismiss: () -> Unit,
-    onSave: (String, String, Double, Int, Float) -> Unit
+    onSave: (String, String, Double, Int, Float, Float) -> Unit
 ) {
     var searchInput by remember { mutableStateOf("") }
     var selectedSymbol by remember { mutableStateOf("") }
@@ -2349,6 +2494,7 @@ fun LaoreSetupDialog(
     var budgetInput by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
     var splitInput by remember { mutableStateOf("40") }
     var yieldInput by remember { mutableStateOf("10.0") }
+    var intervalInput by remember { mutableStateOf("24") }
     
     var apiSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -2528,6 +2674,16 @@ fun LaoreSetupDialog(
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal)
                     )
+                    
+                    if (serviceType == "crypto") {
+                        OutlinedTextField(
+                            value = intervalInput,
+                            onValueChange = { intervalInput = it.filter { char -> char.isDigit() || char == '.' } },
+                            label = { Text("매수 주기(시간) (기본 24)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                        )
+                    }
                 }
             }
         },
@@ -2537,8 +2693,9 @@ fun LaoreSetupDialog(
                     val budget = budgetInput.text.replace(",", "").toDoubleOrNull() ?: 0.0
                     val split = splitInput.toIntOrNull() ?: 40
                     val yieldVal = yieldInput.toFloatOrNull() ?: 10.0f
+                    val intervalVal = intervalInput.toFloatOrNull() ?: 24.0f
                     if (selectedSymbol.isNotEmpty() && budget > 0) {
-                        onSave(selectedSymbol, selectedName, budget, split, yieldVal)
+                        onSave(selectedSymbol, selectedName, budget, split, yieldVal, intervalVal)
                     }
                 },
                 enabled = selectedSymbol.isNotEmpty() && (budgetInput.text.replace(",", "").toDoubleOrNull() ?: 0.0) > 0

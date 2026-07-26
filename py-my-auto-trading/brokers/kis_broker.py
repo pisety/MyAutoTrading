@@ -228,7 +228,7 @@ class KISBroker(BaseBroker):
                             "OVRS_EXCG_CD": "NASD",
                             "PDNO": symbol.strip(),
                             "ORD_QTY": str(qty),
-                            "OVRS_ORD_UNPR": str(price),
+                            "OVRS_ORD_UNPR": f"{price:.4f}" if price < 1.0 else f"{price:.2f}",
                             "ORD_SVR_DVSN_CD": "0",
                             "ORD_DVSN": dvsn
                         }
@@ -272,8 +272,10 @@ class KISBroker(BaseBroker):
                     async with session.post(url, headers=headers, json=body, timeout=10) as res:
                         data = await res.json()
                         if data.get("rt_cd") == "0":
-                            logger.info(f"Domestic Order success: {side} {symbol} {qty} @ {price}")
-                            return True, "주문 성공"
+                            output = data.get("output", {})
+                            odno = output.get("ODNO", "") if isinstance(output, dict) else ""
+                            logger.info(f"Domestic Order success: {side} {symbol} {qty} @ {price} (ODNO: {odno})")
+                            return True, f"주문 성공|{odno}" if odno else "주문 성공"
                         else:
                             msg = data.get("msg1", "")
                             logger.warning(f"Domestic Order failed: {msg}")
@@ -284,6 +286,50 @@ class KISBroker(BaseBroker):
             last_error = f"시스템 오류: {e}"
 
         return False, last_error
+
+    async def cancel_all_orders(self, symbol: str) -> bool:
+        # KIS broker uses LOC which auto cancels
+        return True
+
+    async def cancel_domestic_order(self, order_no: str, symbol: str, qty: int, ord_dvsn: str = "01") -> Tuple[bool, str]:
+        if not await self.ensure_valid_token():
+            return False, "KIS 토큰 발급 실패"
+
+        tr_id = "VTTC0803U" if self.is_mock else "TTTC0803U"
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
+        body = {
+            "CANO": self.account_number,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "KRX_FWDG_ORD_ORG_NO": "",
+            "ORGN_ODNO": order_no,
+            "ORD_DVSN": ord_dvsn,
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": "0",
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y"
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=body, timeout=10) as res:
+                    data = await res.json()
+                    if data.get("rt_cd") == "0":
+                        logger.info(f"Domestic Order cancel success: {order_no} ({symbol})")
+                        return True, "취소 성공"
+                    else:
+                        msg = data.get("msg1", "")
+                        logger.warning(f"Domestic Order cancel failed: {msg}")
+                        return False, msg
+        except Exception as e:
+            logger.error(f"Cancel exception: {e}")
+            return False, f"오류: {e}"
+
 
     async def fetch_rest_current_prices(self, symbols: List[str]) -> Dict[str, float]:
         if not await self.ensure_valid_token():
@@ -326,7 +372,24 @@ class KISBroker(BaseBroker):
                         await asyncio.sleep(0.2)
                     
                     if not found:
-                        logger.warning(f"Failed to fetch REST price for {sym} on all exchanges.")
+                        logger.warning(f"Failed to fetch REST price for {sym} from KIS on all exchanges. Falling back to Yahoo Finance...")
+                        try:
+                            yf_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_clean}"
+                            yf_headers = {'User-Agent': 'Mozilla/5.0'}
+                            async with session.get(yf_url, headers=yf_headers, timeout=10) as res:
+                                if res.status == 200:
+                                    data = await res.json()
+                                    if "chart" in data and "result" in data["chart"] and data["chart"]["result"]:
+                                        price = data["chart"]["result"][0]["meta"].get("regularMarketPrice")
+                                        if price:
+                                            result[sym] = float(price)
+                                            found = True
+                                            logger.info(f"Successfully fetched price for {sym} from Yahoo Finance: {price}")
+                        except Exception as e:
+                            logger.error(f"Yahoo Finance fallback error for {sym}: {e}")
+                        
+                    if not found:
+                        logger.warning(f"Failed to fetch REST price for {sym} on all exchanges including fallback.")
                 else:
                     params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": sym_clean}
                     try:

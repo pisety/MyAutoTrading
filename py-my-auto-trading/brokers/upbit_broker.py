@@ -275,6 +275,48 @@ class UpbitBroker(BaseBroker):
             logger.error(f"Upbit order exception: {e}")
             return False, f"시스템 오류: {e}"
 
+    async def cancel_all_orders(self, symbol: str) -> bool:
+        if not await self.ensure_valid_token():
+            return False
+            
+        try:
+            url = f"{self.BASE_URL}/v1/orders"
+            params = {
+                "market": symbol,
+                "state": "wait",
+                "page": 1,
+                "limit": 100
+            }
+            headers = {
+                **self._auth_headers(params),
+                "Content-Type": "application/json",
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=10)) as res:
+                    if res.status in (200, 201):
+                        orders = await res.json()
+                        for order in orders:
+                            uuid = order.get('uuid')
+                            if uuid:
+                                del_params = {"uuid": uuid}
+                                del_url = f"{self.BASE_URL}/v1/order"
+                                del_headers = {
+                                    **self._auth_headers(del_params),
+                                    "Content-Type": "application/json",
+                                }
+                                async with session.delete(del_url, headers=del_headers, params=del_params, timeout=aiohttp.ClientTimeout(total=10)) as del_res:
+                                    if del_res.status not in (200, 201):
+                                        logger.warning(f"Upbit failed to cancel order {uuid}: {await del_res.text()}")
+                                await asyncio.sleep(0.2)
+                        return True
+                    else:
+                        logger.warning(f"Upbit fetch orders failed ({res.status}): {await res.text()}")
+                        return False
+        except Exception as e:
+            logger.error(f"Upbit cancel_all_orders error: {e}")
+            return False
+
     async def fetch_rest_current_prices(self, symbols: List[str]) -> Dict[str, float]:
         """REST API 기반 시세 조회. symbols는 'KRW-BTC' 형식 리스트."""
         if not symbols:

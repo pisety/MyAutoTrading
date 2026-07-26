@@ -115,7 +115,8 @@ data class LaoreSettings(
     val enabled: Boolean = false,
     val total_budget: Double = 0.0,
     val split_count: Int = 40,
-    val target_yield_percent: Float = 10.0f
+    val target_yield_percent: Float = 10.0f,
+    val interval_hours: Float = 24.0f
 )
 
 @IgnoreExtraProperties
@@ -129,4 +130,18 @@ data class LaoreStatus(
     val target_sell_price: Double = 0.0,
     val remaining_cash: Double = 0.0
 )
+
+@IgnoreExtraProperties
+data class ReservationOrder(
+    val symbol: String = "",
+    val name: String = "",
+    val quantity: Double = 0.0,
+    val auto_cancel_enabled: Boolean = false,
+    val auto_cancel_threshold: Float = 1.0f,
+    val status: String = "대기중",
+    val order_no: String = "",
+    val timestamp: String = "",
+    val last_updated: String = ""
+)
+
 

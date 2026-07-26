@@ -8,6 +8,7 @@ load_dotenv()
 
 from database.firebase_client import FirebaseClient
 from engine.user_manager import UserManager
+from engine.reservation_manager import ReservationManager
 
 from logging.handlers import RotatingFileHandler
 
@@ -42,13 +43,18 @@ async def main():
     user_manager = UserManager(fb_client)
     user_manager.start_listening()
 
-    # 3. Keep Main Loop Running
+    # 3. Initialize ReservationManager
+    resv_manager = ReservationManager(fb_client, user_manager)
+    await resv_manager.start()
+
+    # 4. Keep Main Loop Running
     try:
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         logger.info("Engine shutting down...")
     finally:
+        await resv_manager.stop()
         await user_manager.stop_all()
 
 if __name__ == "__main__":

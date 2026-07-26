@@ -35,6 +35,12 @@ class TradingViewModel : ViewModel() {
     private val _laoreStatus = MutableStateFlow<Map<String, LaoreStatus>>(emptyMap())
     val laoreStatus = _laoreStatus.asStateFlow()
 
+    private val _cryptoLaoreSettings = MutableStateFlow<Map<String, LaoreSettings>>(emptyMap())
+    val cryptoLaoreSettings = _cryptoLaoreSettings.asStateFlow()
+
+    private val _cryptoLaoreStatus = MutableStateFlow<Map<String, LaoreStatus>>(emptyMap())
+    val cryptoLaoreStatus = _cryptoLaoreStatus.asStateFlow()
+
     private val _stockAccountData = MutableStateFlow(UserAccountData())
     val stockAccountData = _stockAccountData.asStateFlow()
 
@@ -50,6 +56,9 @@ class TradingViewModel : ViewModel() {
 
     private val _manualOrderStatus = MutableStateFlow<ManualOrder?>(null)
     val manualOrderStatus = _manualOrderStatus.asStateFlow()
+
+    private val _reservationOrders = MutableStateFlow<Map<String, ReservationOrder>>(emptyMap())
+    val reservationOrders = _reservationOrders.asStateFlow()
 
     // Market data for autocomplete
     private val _domesticStocks = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -72,8 +81,12 @@ class TradingViewModel : ViewModel() {
     private var cryptoSettingsListener: ValueEventListener? = null
     private var cryptoAccountListener: ValueEventListener? = null
     private var cryptoOrderListener: ValueEventListener? = null
+    private var cryptoLaoreSettingsListener: ValueEventListener? = null
+    private var cryptoLaoreStatusListener: ValueEventListener? = null
+
     private var laoreSettingsListener: ValueEventListener? = null
     private var laoreStatusListener: ValueEventListener? = null
+    private var stockReservationListener: ValueEventListener? = null
 
     private var stockActiveAccountId = ""
     private var cryptoActiveAccountId = ""
@@ -81,12 +94,15 @@ class TradingViewModel : ViewModel() {
     private var stockStatusRef: com.google.firebase.database.DatabaseReference? = null
     private var stockSettingsRef: com.google.firebase.database.DatabaseReference? = null
     private var stockOrderRef: com.google.firebase.database.DatabaseReference? = null
-    private var laoreSettingsRef: com.google.firebase.database.DatabaseReference? = null
-    private var laoreStatusRef: com.google.firebase.database.DatabaseReference? = null
-
     private var cryptoStatusRef: com.google.firebase.database.DatabaseReference? = null
     private var cryptoSettingsRef: com.google.firebase.database.DatabaseReference? = null
     private var cryptoOrderRef: com.google.firebase.database.DatabaseReference? = null
+    private var cryptoLaoreSettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var cryptoLaoreStatusRef: com.google.firebase.database.DatabaseReference? = null
+    private var laoreSettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var laoreStatusRef: com.google.firebase.database.DatabaseReference? = null
+    private var stockReservationRef: com.google.firebase.database.DatabaseReference? = null
+
 
     init {
         startListening(_userId.value)
@@ -169,12 +185,14 @@ class TradingViewModel : ViewModel() {
         stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
         laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
         laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
+        stockReservationListener?.let { stockReservationRef?.removeEventListener(it) }
 
         stockStatusRef = database.getReference("$accountPath/status")
         stockSettingsRef = database.getReference("$accountPath/settings")
         stockOrderRef = database.getReference("$accountPath/manual_orders")
         laoreSettingsRef = database.getReference("$accountPath/laore_settings")
         laoreStatusRef = database.getReference("$accountPath/laore_status")
+        stockReservationRef = database.getReference("$accountPath/reservation_orders")
 
         if (stockStatusListener == null) {
             stockStatusListener = object : ValueEventListener {
@@ -216,12 +234,21 @@ class TradingViewModel : ViewModel() {
                 override fun onCancelled(error: DatabaseError) {}
             }
         }
+        if (stockReservationListener == null) {
+            stockReservationListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _reservationOrders.value = parseReservationOrders(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
 
         stockStatusRef?.addValueEventListener(stockStatusListener!!)
         stockSettingsRef?.addValueEventListener(stockSettingsListener!!)
         stockOrderRef?.addValueEventListener(stockOrderListener!!)
         laoreSettingsRef?.addValueEventListener(laoreSettingsListener!!)
         laoreStatusRef?.addValueEventListener(laoreStatusListener!!)
+        stockReservationRef?.addValueEventListener(stockReservationListener!!)
     }
 
     private fun restartCryptoAccountSpecificListeners(servicePath: String, activeId: String) {
@@ -231,10 +258,14 @@ class TradingViewModel : ViewModel() {
         cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
         cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
         cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
+        cryptoLaoreSettingsListener?.let { cryptoLaoreSettingsRef?.removeEventListener(it) }
+        cryptoLaoreStatusListener?.let { cryptoLaoreStatusRef?.removeEventListener(it) }
 
         cryptoStatusRef = database.getReference("$accountPath/status")
         cryptoSettingsRef = database.getReference("$accountPath/settings")
         cryptoOrderRef = database.getReference("$accountPath/manual_orders")
+        cryptoLaoreSettingsRef = database.getReference("$accountPath/laore_settings")
+        cryptoLaoreStatusRef = database.getReference("$accountPath/laore_status")
 
         if (cryptoStatusListener == null) {
             cryptoStatusListener = object : ValueEventListener {
@@ -260,10 +291,28 @@ class TradingViewModel : ViewModel() {
                 override fun onCancelled(error: DatabaseError) {}
             }
         }
+        if (cryptoLaoreSettingsListener == null) {
+            cryptoLaoreSettingsListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _cryptoLaoreSettings.value = parseLaoreSettings(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
+        if (cryptoLaoreStatusListener == null) {
+            cryptoLaoreStatusListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    _cryptoLaoreStatus.value = parseLaoreStatus(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+        }
 
         cryptoStatusRef?.addValueEventListener(cryptoStatusListener!!)
         cryptoSettingsRef?.addValueEventListener(cryptoSettingsListener!!)
         cryptoOrderRef?.addValueEventListener(cryptoOrderListener!!)
+        cryptoLaoreSettingsRef?.addValueEventListener(cryptoLaoreSettingsListener!!)
+        cryptoLaoreStatusRef?.addValueEventListener(cryptoLaoreStatusListener!!)
     }
 
     // ============ PARSING HELPERS ============
@@ -392,16 +441,20 @@ class TradingViewModel : ViewModel() {
         val path = "${getAccountPath(_userId.value, serviceType)}/status/stock_names"
         database.getReference(path).child(sym).setValue(name)
     }
-    fun saveLaoreSetting(compositeKey: String, settings: LaoreSettings) {
+    fun saveLaoreSetting(compositeKey: String, settings: LaoreSettings, serviceType: String = "stock") {
         val id = _userId.value.trim()
         if (id.isEmpty()) return
-        database.getReference("${getAccountPath(id, "stock")}/laore_settings/$compositeKey").setValue(settings)
+        database.getReference("${getAccountPath(id, serviceType)}/laore_settings/$compositeKey").setValue(settings)
     }
     
-    fun removeLaoreSetting(compositeKey: String) {
+    fun removeLaoreSetting(compositeKey: String, serviceType: String = "stock") {
         val id = _userId.value.trim()
         if (id.isEmpty()) return
-        database.getReference("${getAccountPath(id, "stock")}/laore_settings/$compositeKey/enabled").setValue(false)
+        
+        val accountPath = getAccountPath(id, serviceType)
+        // 설정 및 상태를 모두 완전히 삭제합니다.
+        database.getReference("$accountPath/laore_settings/$compositeKey").removeValue()
+        database.getReference("$accountPath/laore_status/$compositeKey").removeValue()
     }
 
     private fun parseSettings(snapshot: DataSnapshot): TradingSettings {
@@ -482,11 +535,14 @@ class TradingViewModel : ViewModel() {
         stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
         laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
         laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
+        stockReservationListener?.let { stockReservationRef?.removeEventListener(it) }
 
         cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
         cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
         cryptoAccountListener?.let { database.getReference("$cryptoPath/account_data").removeEventListener(it) }
         cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
+        cryptoLaoreSettingsListener?.let { cryptoLaoreSettingsRef?.removeEventListener(it) }
+        cryptoLaoreStatusListener?.let { cryptoLaoreStatusRef?.removeEventListener(it) }
         
         stockActiveAccountId = ""
         cryptoActiveAccountId = ""
@@ -693,7 +749,7 @@ class TradingViewModel : ViewModel() {
         if (serviceType == "stock" && isOverseas != null) {
             val currentSymbols = _stockSettings.value.watch_symbols.keys
             val otherMarketSymbols = currentSymbols.filter { sym ->
-                if (isOverseas) sym.all { it.isDigit() } else !sym.all { it.isDigit() }
+                if (isOverseas) sym.any { it.isDigit() } else !sym.any { it.isDigit() }
             }
             otherMarketSymbols.forEach { sym ->
                 symbolsMap[sym] = SymbolSettings(true, index++)
@@ -753,6 +809,47 @@ class TradingViewModel : ViewModel() {
     fun updateSurgeTradingSettings(config: SurgeTradingConfig, serviceType: String) {
         val servicePath = getAccountPath(_userId.value, serviceType)
         database.getReference("$servicePath/settings/surge_trading").setValue(config)
+    }
+
+    private fun parseReservationOrders(snapshot: DataSnapshot): Map<String, ReservationOrder> {
+        val result = mutableMapOf<String, ReservationOrder>()
+        for (child in snapshot.children) {
+            val order = child.getValue(ReservationOrder::class.java)
+            if (order != null) {
+                result[child.key ?: ""] = order
+            }
+        }
+        return result
+    }
+
+    fun sendReservationOrder(symbol: String, name: String, quantity: Double, autoCancelEnabled: Boolean, autoCancelThreshold: Float) {
+        val servicePath = getAccountPath(_userId.value, "stock")
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val orderId = "RESV_" + System.currentTimeMillis()
+        val order = ReservationOrder(symbol, name, quantity, autoCancelEnabled, autoCancelThreshold, "대기중", "", timestamp, timestamp)
+        database.getReference("$servicePath/reservation_orders/$orderId").setValue(order)
+    }
+
+    fun cancelReservationOrder(orderId: String) {
+        val servicePath = getAccountPath(_userId.value, "stock")
+        database.getReference("$servicePath/reservation_orders/$orderId/status").setValue("취소요청")
+    }
+
+    fun restartReservationOrder(orderId: String) {
+        val servicePath = getAccountPath(_userId.value, "stock")
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        database.getReference("$servicePath/reservation_orders/$orderId/status").setValue("대기중")
+        database.getReference("$servicePath/reservation_orders/$orderId/last_updated").setValue(timestamp)
+    }
+
+    fun toggleReservationAutoCancel(orderId: String, currentEnabled: Boolean) {
+        val servicePath = getAccountPath(_userId.value, "stock")
+        database.getReference("$servicePath/reservation_orders/$orderId/auto_cancel_enabled").setValue(!currentEnabled)
+    }
+
+    fun deleteReservationOrder(orderId: String) {
+        val servicePath = getAccountPath(_userId.value, "stock")
+        database.getReference("$servicePath/reservation_orders/$orderId").removeValue()
     }
 
     override fun onCleared() {

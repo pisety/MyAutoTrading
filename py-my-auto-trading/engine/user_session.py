@@ -565,6 +565,8 @@ class UserSession:
         kr_target_hour = 15
         kr_target_min = 20
         
+        is_crypto = (self.service_type == "crypto")
+        
         for composite_key, settings in laore_settings.items():
             if not isinstance(settings, dict) or not settings.get("enabled", False):
                 continue
@@ -572,15 +574,29 @@ class UserSession:
             real_symbol = composite_key.split("_", 1)[1] if "_" in composite_key else composite_key
             active_acc = self.account_data.saved_accounts.get(self.account_data.active_account_id)
             is_overseas = active_acc.is_overseas if active_acc else False
+            is_mock = active_acc.is_mock if active_acc else False
                 
-            target_hour = us_target_hour if is_overseas else kr_target_hour
-            target_min = us_target_min if is_overseas else kr_target_min
-            
             status = laore_status_map.get(composite_key, {})
-            last_exec_date = status.get("last_exec_date", "")
             current_date_str = now_kst.strftime("%Y-%m-%d")
             
-            if now_kst.hour == target_hour and now_kst.minute >= target_min and last_exec_date != current_date_str:
+            should_execute = False
+            if is_crypto:
+                interval_hours = settings.get("interval_hours", 12.0)
+                last_exec_ts = status.get("last_exec_timestamp", 0.0)
+                if time.time() - last_exec_ts >= (interval_hours * 3600):
+                    should_execute = True
+            else:
+                if is_mock and is_overseas:
+                    target_hour = 22 if is_summer else 23
+                    target_min = 50
+                else:
+                    target_hour = us_target_hour if is_overseas else kr_target_hour
+                    target_min = us_target_min if is_overseas else kr_target_min
+                last_exec_date = status.get("last_exec_date", "")
+                if now_kst.hour == target_hour and now_kst.minute >= target_min and last_exec_date != current_date_str:
+                    should_execute = True
+            
+            if should_execute:
                 current_price = self.price_data.get(real_symbol)
                 if not current_price:
                     try:
@@ -591,8 +607,28 @@ class UserSession:
                         
                 if not current_price: continue
                 
+                status = laore_status_map.get(composite_key, {})
+                if "average_price" not in status:
+                    status["average_price"] = 0.0
+                    status["holding_quantity"] = 0.0
+                    status["current_round"] = 0
+                    status["t_value"] = 0.0
+                
+                if is_crypto:
+                    await self.broker.cancel_all_orders(real_symbol)
+                
+                bal, yld, avail_cash, holdings = await self.broker.get_balance()
+                if holdings is not None:
+                    holding = next((h for h in holdings if isinstance(h, dict) and h.get("symbol") == real_symbol), None)
+                    if holding:
+                        status["holding_quantity"] = float(holding.get("quantity", holding.get("qty", 0.0)))
+                        status["average_price"] = float(holding.get("purchase_avg_price", holding.get("avg_price", 0.0)))
+                    else:
+                        status["holding_quantity"] = 0.0
+                        status["average_price"] = 0.0
+                
                 try:
-                    orders = calculate_daily_orders(settings, status, current_price)
+                    orders = calculate_daily_orders(settings, status, current_price, self.service_type)
                 except Exception as e:
                     logger.error(f"Error calculating laore orders for {composite_key}: {e}")
                     continue
@@ -600,37 +636,82 @@ class UserSession:
                 if orders['buy'] or orders['sell']:
                     active_acc = self.account_data.saved_accounts.get(self.account_data.active_account_id)
                     is_mock = active_acc.is_mock if active_acc else False
-                    ord_dvsn = "00" if is_mock else ("34" if is_overseas else "03") # 03 is LOC (종가) for KRX, 34 for US
+                    
+                    ord_dvsn_kw = {}
+                    if not is_crypto:
+                        ord_dvsn_kw['ord_dvsn'] = "00" if is_mock else ("34" if is_overseas else "03")
 
                     successful_buy_qty = 0.0
                     successful_sell_qty = 0.0
+                    total_buy_cost = 0.0
                     any_success = False
+                    critical_error = False
+
+                    if not is_crypto and now_kst.weekday() >= 5:
+                        logger.info(f"Skipping Laore for {real_symbol} because today is a weekend.")
+                        status['last_exec_date'] = current_date_str
+                        self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
+                        continue
 
                     for b_ord in orders['buy']:
-                        success, msg = await self.broker.execute_order(real_symbol, "BUY", b_ord['qty'], b_ord['price'], False, ord_dvsn=ord_dvsn)
+                        success, msg = await self.broker.execute_order(real_symbol, "BUY", b_ord['qty'], b_ord['price'], False, **ord_dvsn_kw)
                         if success:
                             successful_buy_qty += b_ord['qty']
+                            total_buy_cost += b_ord['qty'] * b_ord['price']
                             any_success = True
                         else:
                             logger.warning(f"Laore BUY failed for {real_symbol}: {msg}")
+                            if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg:
+                                critical_error = True
+                                break
+                            self.fb.send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 주문 실패: {msg}")
+                            if "잔고" in msg or "초과" in msg or "부족" in msg:
+                                critical_error = True
+                                break
                         import asyncio
-                        await asyncio.sleep(0.3)
-                    for s_ord in orders['sell']:
-                        success, msg = await self.broker.execute_order(real_symbol, "SELL", s_ord['qty'], s_ord['price'], False, ord_dvsn=ord_dvsn)
-                        if success:
-                            successful_sell_qty += s_ord['qty']
-                            any_success = True
-                        else:
-                            logger.warning(f"Laore SELL failed for {real_symbol}: {msg}")
-                        import asyncio
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(1.0 if is_mock else 0.6)
+                    if not critical_error:
+                        for s_ord in orders['sell']:
+                            success, msg = await self.broker.execute_order(real_symbol, "SELL", s_ord['qty'], s_ord['price'], False, **ord_dvsn_kw)
+                            if success:
+                                successful_sell_qty += s_ord['qty']
+                                any_success = True
+                            else:
+                                logger.warning(f"Laore SELL failed for {real_symbol}: {msg}")
+                                if "영업일" in msg or "휴장" in msg:
+                                    critical_error = True
+                                    break
+                                self.fb.send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 주문 실패: {msg}")
+                                if "잔고" in msg or "초과" in msg or "부족" in msg:
+                                    critical_error = True
+                                    break
+                            import asyncio
+                            await asyncio.sleep(1.0 if is_mock else 0.6)
                     
                     if any_success:
+                        old_qty = status.get("holding_quantity", 0.0)
+                        old_avg = status.get("average_price", 0.0)
+                        new_qty = old_qty + successful_buy_qty - successful_sell_qty
+
+                        if successful_sell_qty >= old_qty + successful_buy_qty or new_qty <= 0:
+                            status['average_price'] = 0.0
+                            status['current_round'] = 0
+                            status['t_value'] = 0.0
+                            status['holding_quantity'] = 0.0
+                        else:
+                            if successful_buy_qty > 0:
+                                status['average_price'] = ((old_qty * old_avg) + total_buy_cost) / (old_qty + successful_buy_qty)
+                            status['current_round'] = status.get("current_round", 0) + 1
+                            status['t_value'] = status.get("t_value", 0.0) + 1.0
+                            status['holding_quantity'] = new_qty
+                            
                         status['last_exec_date'] = current_date_str
-                        status['current_round'] = status.get("current_round", 0) + 1
-                        status['average_price'] = current_price
-                        status['t_value'] = status.get("t_value", 0.0) + 1.0
-                        status['holding_quantity'] = status.get("holding_quantity", 0.0) + successful_buy_qty - successful_sell_qty
+                        status['last_exec_timestamp'] = time.time()
+                        self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
+                    elif critical_error:
+                        logger.info(f"Laore skipped updating status for {composite_key} due to critical error, but updating last_exec_date to prevent spam.")
+                        status['last_exec_date'] = current_date_str
+                        status['last_exec_timestamp'] = time.time()
                         self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
                     else:
                         logger.info(f"Laore skipped updating status for {composite_key} because all orders failed.")

@@ -39,8 +39,8 @@ class AccountInfo(BaseModel):
     app_key: str = ""
     app_secret: str = ""
     broker: str = "KIS"
-    is_mock: bool = Field(default=False, alias="_mock")
-    is_overseas: bool = Field(default=True, alias="_overseas")
+    is_mock: bool = Field(default=False)
+    is_overseas: bool = Field(default=True)
     last_used_timestamp: Optional[str] = None
     
     model_config = {

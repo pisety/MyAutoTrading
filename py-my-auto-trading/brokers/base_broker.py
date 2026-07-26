@@ -31,6 +31,11 @@ class BaseBroker(ABC):
         pass
     
     @abstractmethod
+    async def cancel_all_orders(self, symbol: str) -> bool:
+        """모든 주문 취소"""
+        pass
+    
+    @abstractmethod
     async def connect_websocket(self, symbols: List[str], on_message_callback: Callable[[str, float], None]):
         """웹소켓 연결 및 종목 시세 구독. 콜백으로 (symbol, price) 전달"""
         pass

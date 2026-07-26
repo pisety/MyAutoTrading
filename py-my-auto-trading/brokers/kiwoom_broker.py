@@ -4,7 +4,8 @@ import logging
 import json
 import time
 import os
-from .base_broker import BaseBroker`nfrom typing import Tuple, Optional, List, Dict, Any
+from .base_broker import BaseBroker
+from typing import Tuple, Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class KiwoomBroker(BaseBroker):
                         except Exception:
                             pass
                             
-                        logger.info(f"Kiwoom Access Token 발급 ?�공: {self.account_number}")
+                        logger.info(f"Kiwoom Access Token 諛쒓툒 ?깃났: {self.account_number}")
                         return self.access_token
                     else:
                         text = await resp.text()
@@ -99,12 +100,12 @@ class KiwoomBroker(BaseBroker):
         if not await self.ensure_valid_token():
             return None, None, None, None
             
-        # 1. ?�수�?조회 (kt00004)
+        # 1. ?덉닔湲?議고쉶 (kt00004)
         url_acnt = f"{self.base_url}/api/dostk/acnt"
         headers_04 = self._get_headers(self.access_token, api_id="kt00004")
         body_04 = {"qry_tp": "0", "dmst_stex_tp": "KRX"}
         
-        # 2. 계좌?��??�고?�역 (kt00018)
+        # 2. 怨꾩쥖?됯??붽퀬?댁뿭 (kt00018)
         headers_18 = self._get_headers(self.access_token, api_id="kt00018")
         body_18 = {"qry_tp": "1", "dmst_stex_tp": "KRX"}
         
@@ -117,14 +118,14 @@ class KiwoomBroker(BaseBroker):
                 cash_balance = 0.0
                 if resp_04.status == 200:
                     res_04 = await resp_04.json()
-                    # entr: ?�수�?                    cash_balance = float(res_04.get("entr", 0))
+                    # entr: ?덉닔湲?                    cash_balance = float(res_04.get("entr", 0))
                 
                 total_yield = 0.0
                 holdings = []
                 total_evlt_amt = 0.0
                 if resp_18.status == 200:
                     res_18 = await resp_18.json()
-                    # tot_prft_rt: 총수?�률
+                    # tot_prft_rt: 珥앹닔?듬쪧
                     total_yield = float(res_18.get("tot_prft_rt", 0))
                     total_evlt_amt = float(res_18.get("tot_evlt_amt", 0))
                     
@@ -170,13 +171,13 @@ class KiwoomBroker(BaseBroker):
 
     async def execute_order(self, symbol: str, side: str, qty: int, price: float, allow_extended_hours: bool) -> tuple:
         if not await self.ensure_valid_token():
-            return False, "?�증 ?�큰 발급 ?�패"
+            return False, "?몄쬆 ?좏겙 諛쒓툒 ?ㅽ뙣"
             
         api_id = "kt10000" if side.lower() == "buy" else "kt10001"
         url = f"{self.base_url}/api/dostk/ordr"
         headers = self._get_headers(self.access_token, api_id=api_id)
         
-        # 0:보통, 3:?�장가. Kiwoom ?�서??"0" ?�는 "3"
+        # 0:蹂댄넻, 3:?쒖옣媛. Kiwoom ?먯꽌??"0" ?먮뒗 "3"
         trde_tp = "3" if price == 0 else "0"
         
         body = {
@@ -194,15 +195,18 @@ class KiwoomBroker(BaseBroker):
                     res = await resp.json()
                     if resp.status == 200 and res.get("return_code") == 0:
                         ord_no = res.get("ord_no")
-                        logger.info(f"[Kiwoom] 주문 ?�송 ?�공 - {symbol} {side} {qty}�?@ {price} (ord_no: {ord_no})")
+                        logger.info(f"[Kiwoom] 二쇰Ц ?꾩넚 ?깃났 - {symbol} {side} {qty}二?@ {price} (ord_no: {ord_no})")
                         return True, ""
                     else:
-                        msg = res.get("return_msg", "?????�는 ?�러")
-                        logger.error(f"[Kiwoom] 주문 ?�송 ?�패: {msg}")
+                        msg = res.get("return_msg", "?????녿뒗 ?먮윭")
+                        logger.error(f"[Kiwoom] 二쇰Ц ?꾩넚 ?ㅽ뙣: {msg}")
                         return False, msg
         except Exception as e:
             logger.error(f"Kiwoom execute_order error: {e}")
             return False, str(e)
+
+    async def cancel_all_orders(self, symbol: str) -> bool:
+        return True
 
     async def fetch_rest_current_prices(self, symbols: list) -> dict:
         if not await self.ensure_valid_token():
@@ -218,11 +222,11 @@ class KiwoomBroker(BaseBroker):
                     if resp.status == 200:
                         res = await resp.json()
                         price = float(res.get("cur_prc", 0))
-                        # ?�일?�비�??? 1:?�한가, 2:?�승, 3:보합, 4:?�한가, 5:?�락
+                        # ?꾩씪?鍮꾨??? 1:?곹븳媛, 2:?곸듅, 3:蹂댄빀, 4:?섑븳媛, 5:?섎씫
                         sig = res.get("pred_pre_sig", "3")
                         diff = float(res.get("pred_pre", 0))
                         
-                        # ?�락??경우 ?�수 처리
+                        # ?섎씫??寃쎌슦 ?뚯닔 泥섎━
                         if sig in ["4", "5"]:
                             diff = -abs(diff)
                         else:
@@ -251,14 +255,14 @@ class KiwoomBroker(BaseBroker):
             
         ws_url = "wss://api.kiwoom.com:10000" if not self.is_mock else "wss://mockapi.kiwoom.com:10000"
         
-        logger.info(f"[Kiwoom] ?�소�??�결 ?�작 - 종목: {symbols}")
+        logger.info(f"[Kiwoom] ?뱀냼耳??곌껐 ?쒖옉 - 醫낅ぉ: {symbols}")
         try:
             self.ws = await websockets.connect(ws_url, extra_headers={
                 "authorization": f"Bearer {self.access_token}",
                 "User-Agent": "Mozilla/5.0"
             })
             
-            # 주식체결(0B) 구독 ?�청
+            # 二쇱떇泥닿껐(0B) 援щ룆 ?붿껌
             subscribe_payload = {
                 "trnm": "REG",
                 "grp_no": "1",
@@ -272,7 +276,7 @@ class KiwoomBroker(BaseBroker):
             }
             
             await self.ws.send(json.dumps(subscribe_payload))
-            logger.info("[Kiwoom] ?�소�?구독 메시지 ?�송 ?�공")
+            logger.info("[Kiwoom] ?뱀냼耳?援щ룆 硫붿떆吏 ?꾩넚 ?깃났")
             
             async for message in self.ws:
                 try:
