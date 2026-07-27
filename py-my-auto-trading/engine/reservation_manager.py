@@ -171,6 +171,18 @@ class ReservationManager:
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
+                
+                # 기존 16시 전송완료 레거시 상태명 자동 마이그레이션 및 대기중 주문 처리
+                if status == "16시 전송완료":
+                    now_kst = datetime.now(timezone(timedelta(hours=9)))
+                    if order.get("order_no"):
+                        self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
+                        logger.info(f"[{session.uid}] 레거시 상태명 자동 변환: 16시 전송완료 ➔ 08:20 접수완료 (ODNO: {order.get('order_no')})")
+                    else:
+                        self.fb.set_data(f"{path}/{order_id}/status", "08:20 전송대기")
+                        logger.info(f"[{session.uid}] 레거시 상태명 자동 변환: 16시 전송완료 ➔ 08:20 전송대기")
+                    continue
+                
                 if status == "대기중" or (status.startswith("08시 유지됨") and not order.get("order_no")):
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
@@ -181,7 +193,7 @@ class ReservationManager:
                     is_0820_window = (now_kst.hour == 8 and 20 <= now_kst.minute <= 39)
                     if not is_0820_window:
                         if status == "대기중":
-                            self.fb.set_data(f"{path}/{order_id}/status", "16시 전송완료")
+                            self.fb.set_data(f"{path}/{order_id}/status", "08:20 전송대기")
                             self.fb.set_data(f"{path}/{order_id}/last_updated", now_kst.strftime("%Y-%m-%d %H:%M:%S"))
                             logger.info(f"[{session.uid}] 장전시간외 매수 주문({symbol}) 접수 완료: 아침 08:20 장전시간외 대기열 전송 대기 중")
                         continue
@@ -203,7 +215,7 @@ class ReservationManager:
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if success:
                         if status == "대기중":
-                            self.fb.set_data(f"{path}/{order_id}/status", "16시 전송완료")
+                            self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
                         if odno:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
@@ -238,7 +250,7 @@ class ReservationManager:
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
                 # 매일 아침 08:20 정각에 대기중이거나 이전일 유지/실패 상태였던 주문들을 대기열로 발사 (08시 자동취소됨은 제외!)
-                if status in ["대기중", "유지됨", "08시 유지됨", "16시 전송완료"] or "실패" in status:
+                if status in ["대기중", "유지됨", "08시 유지됨", "16시 전송완료", "08:20 전송대기"] or "실패" in status:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
@@ -261,7 +273,7 @@ class ReservationManager:
                         
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if success:
-                        self.fb.set_data(f"{path}/{order_id}/status", "16시 전송완료")
+                        self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
                         if odno:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
@@ -298,7 +310,7 @@ class ReservationManager:
                     continue
                 
                 status = order.get("status", "")
-                if status in ["16시 전송완료", "대기중", "유지됨", "08시 유지됨", "08시 자동취소됨"] or "실패" in status:
+                if status in ["16시 전송완료", "08:20 전송대기", "08:20 접수완료", "대기중", "유지됨", "08시 유지됨", "08시 자동취소됨"] or "실패" in status:
                     symbol = order.get("symbol", "")
                     name = order.get("name", symbol)
                     qty = int(float(order.get("quantity", 0)))
@@ -346,7 +358,7 @@ class ReservationManager:
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
-                if status == "16시 전송완료":
+                if status in ["16시 전송완료", "08:20 접수완료"]:
                     order_no = order.get("order_no", "")
                     symbol = order.get("symbol", "")
                     name = order.get("name", symbol)
@@ -379,7 +391,7 @@ class ReservationManager:
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
-                if status == "16시 전송완료":
+                if status in ["16시 전송완료", "08:20 접수완료"]:
                     order_no = order.get("order_no", "")
                     symbol = order.get("symbol", "")
                     name = order.get("name", symbol)
