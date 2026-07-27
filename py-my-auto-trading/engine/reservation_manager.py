@@ -192,6 +192,11 @@ class ReservationManager:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
                         logger.info(f"[{session.uid}] 08:20~08:40 신규 예약매수 즉시 전송성공! (ODNO: {odno})")
+                        self.fb.send_push_notification(
+                            session.uid,
+                            "🚀 장전시간외 매수 주문 전송 완료",
+                            f"[{symbol}] {qty}주 한국투자증권 전송 성공! (주문번호: {odno})"
+                        )
                     else:
                         self.fb.set_data(f"{path}/{order_id}/status", f"전송실패({msg_text})")
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
@@ -245,6 +250,11 @@ class ReservationManager:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
                         logger.info(f"[{session.uid}] 장전시간외 대기열 전송성공! (ODNO: {odno})")
+                        self.fb.send_push_notification(
+                            session.uid,
+                            "🚀 08:20 장전시간외 대기열 선점 완료",
+                            f"[{symbol}] {qty}주 한국투자증권 대기열 접수 성공! (주문번호: {odno})"
+                        )
                     else:
                         self.fb.set_data(f"{path}/{order_id}/status", f"전송실패({msg_text})")
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
