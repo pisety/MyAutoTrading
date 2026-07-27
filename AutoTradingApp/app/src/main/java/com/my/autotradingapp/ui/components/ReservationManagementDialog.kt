@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.my.autotradingapp.data.ReservationOrder
@@ -403,13 +404,17 @@ fun ReservationManagementDialog(
                                             text = "${order.name} (${order.symbol})", 
                                             fontWeight = FontWeight.Bold, 
                                             color = MaterialTheme.colorScheme.primary,
-                                            fontSize = 15.sp
+                                            fontSize = 15.sp,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Surface(
                                             color = when {
-                                                order.status == "대기중" -> MaterialTheme.colorScheme.primaryContainer
-                                                order.status.contains("전송완료") -> Color(0xFFE8F5E9)
-                                                order.status.contains("취소") -> MaterialTheme.colorScheme.errorContainer
+                                                order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.primaryContainer
+                                                order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFFE8F5E9)
+                                                order.status.contains("취소") || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
                                                 else -> MaterialTheme.colorScheme.secondaryContainer
                                             },
                                             shape = MaterialTheme.shapes.small
@@ -418,7 +423,9 @@ fun ReservationManagementDialog(
                                                 text = order.status, 
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                 fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
