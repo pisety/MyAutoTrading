@@ -299,3 +299,6 @@ class KiwoomBroker(BaseBroker):
         if self.ws:
             await self.ws.close()
             self.ws = None
+
+    async def inquire_order_fill_status(self, order_no: str) -> Tuple[int, int]:
+        return 0, -1

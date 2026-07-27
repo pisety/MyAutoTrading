@@ -15,6 +15,7 @@ class ReservationManager:
         self._task: Optional[asyncio.Task] = None
         self._last_1600_date: Optional[str] = None
         self._last_0800_date: Optional[str] = None
+        self._last_0840_date: Optional[str] = None
 
     async def start(self):
         logger.info("ReservationManager scheduler started.")
@@ -92,11 +93,14 @@ class ReservationManager:
                 else:
                     await self._reset_weekend_failed_orders()
                 
-                # 2. 08시 20분 정각 체크 (08:20:00 ~ 08:20:05 사이 실행, 당일 1회 한정) - 장전시간외 종가 대기열 일괄 접수
+                # 2. 08시 20분 정각 체크 (08:20:00.050 정밀 트리거, 당일 1회 한정) - 장전시간외 종가 대기열 일괄 접수
                 if now.hour == 8 and now.minute == 20 and now.second <= 5:
                     if self._last_1600_date != today_str:
                         self._last_1600_date = today_str
-                        logger.info(f"[{today_str} 08:20:00] 장전시간외 종가 대기열 선점 스케줄러 트리거!")
+                        # 증권사 서버 오픈(08:20:00.000) 전에 도착하여 '장운영시간이 아닙니다' 에러로 튕기는 것을 방지하기 위해 50ms(0.05초) 대기 후 정밀 발사
+                        if now.second == 0 and now.microsecond < 50000:
+                            await asyncio.sleep((50000 - now.microsecond) / 1000000.0)
+                        logger.info(f"[{today_str} 08:20:00.050] 장전시간외 종가 대기열 선점 스케줄러 정밀 트리거!")
                         await self.execute_reservations_0820()
                 
                 # 3. 08시 00분 정각 체크 (08:00:00 ~ 08:00:05 사이 실행, 당일 1회 한정)
@@ -105,6 +109,18 @@ class ReservationManager:
                         self._last_0800_date = today_str
                         logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
                         await self.evaluate_and_cancel_0800()
+
+                # 4. 08시 30분 ~ 08시 39분: 10초 주기 장전시간외 종가매수 실시간 체결 알림 검사
+                if now.hour == 8 and 30 <= now.minute < 40 and now.second % 10 == 0:
+                    await self.check_0830_0840_fill_status()
+
+                # 5. 08시 40분 정각 체크 (08:40:00 ~ 08:40:05 사이 실행, 당일 1회 한정) - 미체결 마감 알림
+                if now.hour == 8 and now.minute == 40 and now.second <= 5:
+                    if self._last_0840_date != today_str:
+                        self._last_0840_date = today_str
+                        logger.info(f"[{today_str} 08:40:00] 장전시간외 종가 미체결 마감 스케줄러 트리거!")
+                        await self.check_0840_unfilled_status()
+
                 
             except Exception as e:
                 logger.error(f"ReservationManager loop error: {e}", exc_info=True)
@@ -315,3 +331,88 @@ class ReservationManager:
                         self.fb.set_data(f"{path}/{order_id}/status", f"08시 유지됨 (평균 {avg_rate:.2f}%)")
                     
                     self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+
+    async def check_0830_0840_fill_status(self):
+        """08:30 ~ 08:39 사이에 전송완료된 장전시간외 주문들의 실시간 체결 여부를 조회하여 체결 완료 알림 발송"""
+        for session_key, session in getattr(self.user_manager, "sessions", {}).items():
+            if not self._is_valid_kis_domestic_session(session):
+                continue
+            
+            path = f"{session.account_path}/reservation_orders"
+            orders = self.fb.get_data(path)
+            if not isinstance(orders, dict):
+                continue
+                
+            for order_id, order in orders.items():
+                if not isinstance(order, dict): continue
+                status = order.get("status", "")
+                if status == "16시 전송완료":
+                    order_no = order.get("order_no", "")
+                    symbol = order.get("symbol", "")
+                    name = order.get("name", symbol)
+                    qty = int(float(order.get("quantity", 0)))
+                    
+                    if order_no and session.broker and hasattr(session.broker, "inquire_order_fill_status"):
+                        tot_ccld_qty, rmnd_qty = await session.broker.inquire_order_fill_status(order_no)
+                        if tot_ccld_qty > 0 and (tot_ccld_qty >= qty or rmnd_qty == 0):
+                            now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+                            self.fb.set_data(f"{path}/{order_id}/status", "08시 장전체결완료")
+                            self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                            logger.info(f"[{session.uid}] 장전시간외 종가매수 실시간 체결 확인: {name}({symbol}) {tot_ccld_qty}주")
+                            self.fb.send_push_notification(
+                                session.uid,
+                                "🎉 장전시간외 종가매수 체결 완료",
+                                f"[{name}] {tot_ccld_qty}주가 장전시간외종가로 체결되었습니다! (주문번호: {order_no})"
+                            )
+
+    async def check_0840_unfilled_status(self):
+        """08:40 마감 시점에 여전히 전송완료(미체결) 상태인 주문들을 최종 조회하여 미체결 마감 또는 체결 알림 발송"""
+        for session_key, session in getattr(self.user_manager, "sessions", {}).items():
+            if not self._is_valid_kis_domestic_session(session):
+                continue
+            
+            path = f"{session.account_path}/reservation_orders"
+            orders = self.fb.get_data(path)
+            if not isinstance(orders, dict):
+                continue
+                
+            for order_id, order in orders.items():
+                if not isinstance(order, dict): continue
+                status = order.get("status", "")
+                if status == "16시 전송완료":
+                    order_no = order.get("order_no", "")
+                    symbol = order.get("symbol", "")
+                    name = order.get("name", symbol)
+                    qty = int(float(order.get("quantity", 0)))
+                    now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    if order_no and session.broker and hasattr(session.broker, "inquire_order_fill_status"):
+                        tot_ccld_qty, rmnd_qty = await session.broker.inquire_order_fill_status(order_no)
+                        if tot_ccld_qty > 0 and (tot_ccld_qty >= qty or rmnd_qty == 0):
+                            self.fb.set_data(f"{path}/{order_id}/status", "08시 장전체결완료")
+                            self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                            logger.info(f"[{session.uid}] 장전시간외 종가매수 마감 시 체결 확인: {name}({symbol}) {tot_ccld_qty}주")
+                            self.fb.send_push_notification(
+                                session.uid,
+                                "🎉 장전시간외 종가매수 체결 완료",
+                                f"[{name}] {tot_ccld_qty}주가 장전시간외종가로 체결되었습니다! (주문번호: {order_no})"
+                            )
+                        else:
+                            self.fb.set_data(f"{path}/{order_id}/status", "08시 장전미체결")
+                            self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                            logger.info(f"[{session.uid}] 장전시간외 종가매수 미체결 마감: {name}({symbol}) {qty}주")
+                            self.fb.send_push_notification(
+                                session.uid,
+                                "⏰ 08:40 장전시간외 매수 미체결 알림",
+                                f"[{name}] {qty}주가 08:40 마감까지 체결되지 않아 자동 마감되었습니다. (주문번호: {order_no})"
+                            )
+                    else:
+                        # API 미지원 시 기본 처리
+                        self.fb.set_data(f"{path}/{order_id}/status", "08시 장전미체결")
+                        self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                        self.fb.send_push_notification(
+                            session.uid,
+                            "⏰ 08:40 장전시간외 매수 미체결 알림",
+                            f"[{name}] {qty}주가 08:40 마감 시점까지 체결되지 않아 마감되었습니다."
+                        )
+

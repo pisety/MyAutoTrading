@@ -330,6 +330,58 @@ class KISBroker(BaseBroker):
             logger.error(f"Cancel exception: {e}")
             return False, f"오류: {e}"
 
+    async def inquire_order_fill_status(self, order_no: str) -> Tuple[int, int]:
+        """주문번호로 일별주문체결조회(TTTC8001R)를 호출하여 (체결수량, 미체결잔량) 반환"""
+        if not await self.ensure_valid_token():
+            return 0, -1
+
+        tr_id = "VTTC8001R" if self.is_mock else "TTTC8001R"
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d")
+        params = {
+            "CANO": self.account_number,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "INQR_STRT_DT": today_str,
+            "INQR_END_DT": today_str,
+            "SLL_BUY_DVSN_CD": "00",
+            "INQR_DVSN": "00",
+            "PDNO": "",
+            "CCLD_DVSN": "00",
+            "ORD_GNO_BRNO": "",
+            "ODNO": order_no,
+            "INQR_DVSN_3": "00",
+            "INQR_DVSN_1": "",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+                async with session.get(url, headers=headers, params=params, timeout=10) as res:
+                    data = await res.json()
+                    if data.get("rt_cd") == "0":
+                        output1 = data.get("output1") or []
+                        for item in output1:
+                            if item.get("odno", "") == order_no or not order_no:
+                                tot_ccld_qty = int(float(item.get("tot_ccld_qty", 0)))
+                                rmnd_qty = int(float(item.get("rmnd_qty", 0)))
+                                return tot_ccld_qty, rmnd_qty
+                        if output1:
+                            item = output1[0]
+                            tot_ccld_qty = int(float(item.get("tot_ccld_qty", 0)))
+                            rmnd_qty = int(float(item.get("rmnd_qty", 0)))
+                            return tot_ccld_qty, rmnd_qty
+                    else:
+                        logger.warning(f"Inquire fill status failed for ODNO {order_no}: {data.get('msg1')}")
+        except Exception as e:
+            logger.error(f"inquire_order_fill_status exception: {e}")
+        return 0, -1
 
     async def fetch_rest_current_prices(self, symbols: List[str]) -> Dict[str, float]:
         if not await self.ensure_valid_token():

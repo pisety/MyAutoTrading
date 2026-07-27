@@ -44,3 +44,7 @@ class BaseBroker(ABC):
     async def close_websocket(self):
         """웹소켓 연결 종료"""
         pass
+
+    async def inquire_order_fill_status(self, order_no: str) -> Tuple[int, int]:
+        """주문번호로 체결/미체결 상태 조회. (체결수량, 미체결잔량) 반환. 기본적으로 (0, -1) 미지원 반환"""
+        return 0, -1

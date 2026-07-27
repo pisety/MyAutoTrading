@@ -392,3 +392,6 @@ class UpbitBroker(BaseBroker):
         if self.ws_task:
             self.ws_task.cancel()
             self.ws_task = None
+
+    async def inquire_order_fill_status(self, order_no: str) -> Tuple[int, int]:
+        return 0, -1
