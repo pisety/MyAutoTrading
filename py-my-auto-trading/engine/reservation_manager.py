@@ -132,7 +132,7 @@ class ReservationManager:
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if order_no and session.broker:
                         c_succ, c_msg = await session.broker.cancel_domestic_order(
-                            order_no=order_no, symbol=symbol, qty=qty, ord_dvsn="01"
+                            order_no=order_no, symbol=symbol, qty=qty, ord_dvsn="05"
                         )
                         if c_succ:
                             self.fb.set_data(f"{path}/{order_id}/status", "취소됨")
@@ -160,11 +160,11 @@ class ReservationManager:
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
                     
-                    logger.info(f"[{session.uid}] 신규/대기 예약매수 즉시 발사: {symbol} {qty}주 (ORD_DVSN: 01)")
+                    logger.info(f"[{session.uid}] 신규/대기 예약매수 즉시 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
                     if not session.broker: continue
                     
                     success, msg = await session.broker.execute_order(
-                        symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="01"
+                        symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="05"
                     )
                     odno = ""
                     if "|" in msg:
@@ -205,18 +205,19 @@ class ReservationManager:
                 
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
+                status = order.get("status", "")
                 # 매일 16시 정각에 대기중이거나 이전일 유지/자동취소/실패 상태였던 주문들을 재발사 (수동 취소됨 제외)
                 if status in ["대기중", "유지됨", "08시 유지됨", "08시 자동취소됨", "16시 전송완료"] or "실패" in status:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
                     
-                    logger.info(f"[{session.uid}] 16시 예약매수 발사: {symbol} {qty}주 (ORD_DVSN: 01)")
+                    logger.info(f"[{session.uid}] 16시 예약매수 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
                     if not session.broker:
                         continue
                         
                     success, msg = await session.broker.execute_order(
-                        symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="01"
+                        symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="05"
                     )
                     
                     odno = ""
@@ -240,8 +241,8 @@ class ReservationManager:
                         logger.warning(f"[{session.uid}] 예약매수 전송실패: {msg_text}")
                         self.fb.send_push_notification(
                             session.uid,
-                            "⚠️ 예약매수 주문 접수 실패",
-                            f"[{symbol}] {qty}주 예약접수 실패: {msg_text}"
+                            "⚠️ 16시 예약매수 발송 실패",
+                            f"[{symbol}] {qty}주 16시 예약발송 실패: {msg_text}"
                         )
 
     async def evaluate_and_cancel_0800(self):
@@ -276,7 +277,7 @@ class ReservationManager:
                         logger.info(f"[{session.uid}] {name} 산술평균 등락률({avg_rate:.2f}%) < 기준값({threshold}%) ➔ 자동 취소 실행!")
                         if order_no and session.broker:
                             c_succ, c_msg = await session.broker.cancel_domestic_order(
-                                order_no=order_no, symbol=symbol, qty=qty, ord_dvsn="01"
+                                order_no=order_no, symbol=symbol, qty=qty, ord_dvsn="05"
                             )
                             if c_succ:
                                 self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
