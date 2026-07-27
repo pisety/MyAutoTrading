@@ -280,7 +280,7 @@ class UpbitBroker(BaseBroker):
             return False
             
         try:
-            url = f"{self.BASE_URL}/v1/orders"
+            url = f"{self.base_url}/orders"
             params = {
                 "market": symbol,
                 "state": "wait",
@@ -300,7 +300,7 @@ class UpbitBroker(BaseBroker):
                             uuid = order.get('uuid')
                             if uuid:
                                 del_params = {"uuid": uuid}
-                                del_url = f"{self.BASE_URL}/v1/order"
+                                del_url = f"{self.base_url}/order"
                                 del_headers = {
                                     **self._auth_headers(del_params),
                                     "Content-Type": "application/json",
