@@ -92,12 +92,12 @@ class ReservationManager:
                 else:
                     await self._reset_weekend_failed_orders()
                 
-                # 2. 16시 00분 정각 체크 (16:00:00 ~ 16:00:05 사이 실행, 당일 1회 한정)
-                if now.hour == 16 and now.minute == 0 and now.second <= 5:
+                # 2. 08시 30분 정각 체크 (08:30:00 ~ 08:30:05 사이 실행, 당일 1회 한정) - 장전시간외 종가매매 실시간 접수
+                if now.hour == 8 and now.minute == 30 and now.second <= 5:
                     if self._last_1600_date != today_str:
                         self._last_1600_date = today_str
-                        logger.info(f"[{today_str} 16:00:00] 장전시간외 예약매수 스케줄러 트리거!")
-                        await self.execute_reservations_1600()
+                        logger.info(f"[{today_str} 08:30:00] 장전시간외 예약매수 실시간 발사 스케줄러 트리거!")
+                        await self.execute_reservations_0830()
                 
                 # 3. 08시 00분 정각 체크 (08:00:00 ~ 08:00:05 사이 실행, 당일 1회 한정)
                 if now.hour == 8 and now.minute == 0 and now.second <= 5:
@@ -143,7 +143,7 @@ class ReservationManager:
                     self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
 
     async def process_pending_new_orders(self):
-        """주말/휴일 또는 평일 16시 이후~익일 아침 7시 이전에 신규 등록된 '대기중' 주문을 즉시 증권사 예약주문으로 발송"""
+        """주말/휴일 또는 평일 16시 이후~익일 아침 7시 이전에 신규 등록된 '대기중' 주문을 관리 및 08:30 접수 준비"""
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
             if not self._is_valid_kis_domestic_session(session):
                 continue
@@ -159,6 +159,15 @@ class ReservationManager:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
+                    
+                    now_kst = datetime.now(timezone(timedelta(hours=9)))
+                    is_0830_window = (now_kst.hour == 8 and 30 <= now_kst.minute <= 39)
+                    if not is_0830_window:
+                        if status == "대기중":
+                            self.fb.set_data(f"{path}/{order_id}/status", "16시 전송완료")
+                            self.fb.set_data(f"{path}/{order_id}/last_updated", now_kst.strftime("%Y-%m-%d %H:%M:%S"))
+                            logger.info(f"[{session.uid}] 장전시간외 매수 주문({symbol}) 접수 완료: 아침 08:30 장전시간외 전송 대기 중")
+                        continue
                     
                     logger.info(f"[{session.uid}] 신규/대기 예약매수 즉시 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
                     if not session.broker: continue
@@ -192,8 +201,8 @@ class ReservationManager:
                             f"[{symbol}] {qty}주 예약접수 실패: {msg_text}"
                         )
 
-    async def execute_reservations_1600(self):
-        """매일 16:00:00.050에 등록된 장전시간외종가 예약매수 발사"""
+    async def execute_reservations_0830(self):
+        """매일 아침 08:30:00.050에 등록된 장전시간외종가 예약매수 실시간 발사 (ORD_DVSN: 05)"""
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
             if not self._is_valid_kis_domestic_session(session):
                 continue
@@ -206,13 +215,13 @@ class ReservationManager:
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
-                # 매일 16시 정각에 대기중이거나 이전일 유지/자동취소/실패 상태였던 주문들을 재발사 (수동 취소됨 제외)
+                # 매일 아침 08:30 정각에 대기중이거나 이전일 유지/자동취소/실패 상태였던 주문들을 즉시 발사
                 if status in ["대기중", "유지됨", "08시 유지됨", "08시 자동취소됨", "16시 전송완료"] or "실패" in status:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
                     
-                    logger.info(f"[{session.uid}] 16시 예약매수 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
+                    logger.info(f"[{session.uid}] 08:30 장전시간외 예약매수 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
                     if not session.broker:
                         continue
                         
@@ -234,15 +243,15 @@ class ReservationManager:
                         if odno:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
-                        logger.info(f"[{session.uid}] 예약매수 전송성공! (ODNO: {odno})")
+                        logger.info(f"[{session.uid}] 장전시간외 예약매수 전송성공! (ODNO: {odno})")
                     else:
                         self.fb.set_data(f"{path}/{order_id}/status", f"전송실패({msg_text})")
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
-                        logger.warning(f"[{session.uid}] 예약매수 전송실패: {msg_text}")
+                        logger.warning(f"[{session.uid}] 장전시간외 예약매수 전송실패: {msg_text}")
                         self.fb.send_push_notification(
                             session.uid,
-                            "⚠️ 16시 예약매수 발송 실패",
-                            f"[{symbol}] {qty}주 16시 예약발송 실패: {msg_text}"
+                            "⚠️ 08:30 장전시간외 매수 발송 실패",
+                            f"[{symbol}] {qty}주 장전시간외 발송 실패: {msg_text}"
                         )
 
     async def evaluate_and_cancel_0800(self):
