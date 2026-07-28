@@ -341,6 +341,11 @@ class ReservationManager:
                     else:
                         logger.info(f"[{session.uid}] {name} 산술평균 등락률({avg_rate:.2f}%) >= 기준값({threshold}%) ➔ 주문 유지!")
                         self.fb.set_data(f"{path}/{order_id}/status", f"08시 유지됨 (평균 {avg_rate:.2f}%)")
+                        self.fb.send_push_notification(
+                            session.uid,
+                            "🇺🇸 08시 미국 증시 예약매수 유지",
+                            f"[{name}({symbol})] 산술평균({avg_rate:.2f}%) ≥ 기준치({threshold}%) ➔ 예약매수 정상 유지(08:20 전송 예정)!"
+                        )
                     
                     self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
 
