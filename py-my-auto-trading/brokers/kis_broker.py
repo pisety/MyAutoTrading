@@ -227,7 +227,7 @@ class KISBroker(BaseBroker):
                             "ACNT_PRDT_CD": self.acnt_prdt_cd,
                             "OVRS_EXCG_CD": "NASD",
                             "PDNO": symbol.strip(),
-                            "ORD_QTY": str(qty),
+                            "ORD_QTY": str(int(float(qty))),
                             "OVRS_ORD_UNPR": f"{price:.4f}" if price < 1.0 else f"{price:.2f}",
                             "ORD_SVR_DVSN_CD": "0",
                             "ORD_DVSN": dvsn
@@ -266,7 +266,7 @@ class KISBroker(BaseBroker):
                         "ACNT_PRDT_CD": self.acnt_prdt_cd,
                         "PDNO": symbol.strip(),
                         "ORD_DVSN": actual_dvsn,
-                        "ORD_QTY": str(int(qty)),
+                        "ORD_QTY": str(int(float(qty))),
                         "ORD_UNPR": ord_unpr
                     }
                     async with session.post(url, headers=headers, json=body, timeout=10) as res:
