@@ -16,26 +16,42 @@ ETF_CONSTITUENTS_MAP = {
     "우주": ["RDW", "RKLB", "LUNR", "SATS", "ASTS", "PL", "VOYG", "GSAT", "SPIR", "SIDU"],
     "SPACE": ["RDW", "RKLB", "LUNR", "SATS", "ASTS", "PL", "VOYG", "GSAT", "SPIR", "SIDU"],
     
-    # 미국 나스닥 100 관련 (133690, 069500, ACE 나스닥100 등)
+    # 미국 나스닥 100 (TIGER 133690, KODEX 379800, ACE 367380, 레버리지 409820 등 실제 상위 10개)
     "133690": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
+    "379800": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
+    "367380": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
+    "409820": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
     "나스닥": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
     "NASDAQ": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
     
-    # 미국 테크 TOP 10 (381170, KODEX 미국AI테크 등)
+    # 미국 테크 TOP 10 (TIGER 381170, KODEX AI테크 487100 등 실제 구성종목 10개)
     "381170": ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "AMD", "QCOM"],
+    "487100": ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "AMD", "QCOM"],
     "테크": ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "AMD", "QCOM"],
     "TOP10": ["NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "AMD", "QCOM"],
     "AI": ["NVDA", "MSFT", "GOOGL", "META", "AVGO", "AMD", "TSMC", "PLTR", "QCOM", "INTC"],
     
-    # 미국 필라델피아 반도체 (381180, 091160 등)
+    # 미국 필라델피아 반도체 (TIGER 381180, KODEX 390390, 레버리지 423920 등 SOX 상위 10개)
     "381180": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "AMAT", "MU", "LRCX", "ADI"],
+    "390390": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "AMAT", "MU", "LRCX", "ADI"],
+    "423920": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "AMAT", "MU", "LRCX", "ADI"],
     "반도체": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "AMAT", "MU", "LRCX", "ADI"],
     "SOX": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "INTC", "AMAT", "MU", "LRCX", "ADI"],
     
-    # 미국 S&P500 관련 (360750 등)
+    # 미국 S&P500 (TIGER 360750, KODEX 379810, ACE 360200, 레버리지 409810 등 실제 상위 10개)
     "360750": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
+    "379810": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
+    "360200": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
+    "409810": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
     "S&P": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
     "SP500": ["MSFT", "AAPL", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "AVGO", "JPM"],
+    
+    # 미국 배당다우존스 SCHD (TIGER 458730, ACE 458720, SOL 446720 등 실제 상위 10개)
+    "458730": ["BMY", "ABBV", "HD", "CVX", "MRK", "PEP", "KO", "PFE", "VZ", "AMGN"],
+    "458720": ["BMY", "ABBV", "HD", "CVX", "MRK", "PEP", "KO", "PFE", "VZ", "AMGN"],
+    "446720": ["BMY", "ABBV", "HD", "CVX", "MRK", "PEP", "KO", "PFE", "VZ", "AMGN"],
+    "SCHD": ["BMY", "ABBV", "HD", "CVX", "MRK", "PEP", "KO", "PFE", "VZ", "AMGN"],
+    "배당": ["BMY", "ABBV", "HD", "CVX", "MRK", "PEP", "KO", "PFE", "VZ", "AMGN"],
     
     # 기본값 (대표 미국 빅테크 상위 10개)
     "DEFAULT": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "AMD", "QCOM"]
