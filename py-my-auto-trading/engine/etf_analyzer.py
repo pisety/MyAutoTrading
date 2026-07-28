@@ -10,10 +10,11 @@ logger = logging.getLogger("ETFAnalyzer")
 
 # 주요 국내 상장 해외 ETF별 미국 상위 구성종목 매핑 (상위 10개 혹은 핵심 벤치마크 구성종목)
 ETF_CONSTITUENTS_MAP = {
-    # TIGER 미국우주테크 (0183J0 / PLUS 우주항공 / 우주섹터)
-    "0183J0": ["RKLB", "PLTR", "GE", "LMT", "NOC", "BA", "LHX", "GD", "ASTS", "LUNR"],
-    "우주": ["RKLB", "PLTR", "GE", "LMT", "NOC", "BA", "LHX", "GD", "ASTS", "LUNR"],
-    "SPACE": ["RKLB", "PLTR", "GE", "LMT", "NOC", "BA", "LHX", "GD", "ASTS", "LUNR"],
+    # TIGER 미국우주테크 (0183J0 / 실제 상장 핵심 구성종목: 레드와이어, 로켓랩, 인튜이티브머신스, 에코스타, ASTS, 플래닛랩스 등)
+    # * 스페이스X(약 25%) 및 파이어플라이 등 비상장기업은 야후 파이낸스 실시간 주가가 없으므로 실제 나스닥/NYSE 거래 핵심 우주주 10개로 시황 판단
+    "0183J0": ["RDW", "RKLB", "LUNR", "SATS", "ASTS", "PL", "VOYG", "GSAT", "SPIR", "SIDU"],
+    "우주": ["RDW", "RKLB", "LUNR", "SATS", "ASTS", "PL", "VOYG", "GSAT", "SPIR", "SIDU"],
+    "SPACE": ["RDW", "RKLB", "LUNR", "SATS", "ASTS", "PL", "VOYG", "GSAT", "SPIR", "SIDU"],
     
     # 미국 나스닥 100 관련 (133690, 069500, ACE 나스닥100 등)
     "133690": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX"],
