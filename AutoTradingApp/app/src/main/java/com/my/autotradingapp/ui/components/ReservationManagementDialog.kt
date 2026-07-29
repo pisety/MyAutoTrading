@@ -410,14 +410,24 @@ fun ReservationManagementDialog(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
+                                        val badgeBgColor = when {
+                                            order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.primaryContainer
+                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFFE8F5E9)
+                                            order.status.contains("자동취소") -> Color(0xFFFFF3E0)
+                                            (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
+                                            else -> MaterialTheme.colorScheme.secondaryContainer
+                                        }
+                                        
+                                        val badgeTextColor = when {
+                                            order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFF1B5E20)
+                                            order.status.contains("자동취소") -> Color(0xFFE65100)
+                                            (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.onErrorContainer
+                                            else -> MaterialTheme.colorScheme.onSecondaryContainer
+                                        }
+
                                         Surface(
-                                            color = when {
-                                                order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.primaryContainer
-                                                order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFFE8F5E9)
-                                                order.status.contains("자동취소") -> Color(0xFFFFF3E0)
-                                                (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
-                                                else -> MaterialTheme.colorScheme.secondaryContainer
-                                            },
+                                            color = badgeBgColor,
                                             shape = MaterialTheme.shapes.small
                                         ) {
                                             Text(
@@ -425,6 +435,7 @@ fun ReservationManagementDialog(
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
+                                                color = badgeTextColor,
                                                 maxLines = 1,
                                                 softWrap = false
                                             )
