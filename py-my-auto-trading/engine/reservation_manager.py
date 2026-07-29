@@ -398,11 +398,22 @@ class ReservationManager:
         """매일 08:00:00에 미국 증시 자동판단 ON인 주문들 평균 시세 검증 및 자동 취소"""
         if not today_str:
             KST = timezone(timedelta(hours=9))
-            today_str = datetime.now(KST).strftime("%Y-%m-%d")
+            now = datetime.now(KST)
+            today_str = now.strftime("%Y-%m-%d")
+        else:
+            now = datetime.strptime(today_str, "%Y-%m-%d")
             
-        base_prices = self.fb.get_data(f"system/us_snapshot/{today_str}_base_price")
+        base_prices = None
+        for i in range(1, 6):
+            prev_date = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+            bp = self.fb.get_data(f"system/us_snapshot/{prev_date}_base_price")
+            if isinstance(bp, dict):
+                base_prices = bp
+                break
+                
         if not isinstance(base_prices, dict):
             base_prices = self.fb.get_data(f"system/us_snapshot/{today_str}_0500")
+            
         if not isinstance(base_prices, dict):
             base_prices = None
 
