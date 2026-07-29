@@ -16,6 +16,8 @@ class ReservationManager:
         self._last_1600_date: Optional[str] = None
         self._last_0800_date: Optional[str] = None
         self._last_0840_date: Optional[str] = None
+        self._last_0500_date: Optional[str] = None
+        self._last_1530_date: Optional[str] = None
 
     async def start(self):
         logger.info("ReservationManager scheduler started.")
@@ -108,7 +110,21 @@ class ReservationManager:
                     if self._last_0800_date != today_str:
                         self._last_0800_date = today_str
                         logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
-                        await self.evaluate_and_cancel_0800()
+                        await self.evaluate_and_cancel_0800(today_str)
+
+                # 3-1. 05시 00분 정각 체크 (05:00:00 ~ 05:00:05 사이 실행, 당일 1회 한정)
+                if now.hour == 5 and now.minute == 0 and now.second <= 5:
+                    if self._last_0500_date != today_str:
+                        self._last_0500_date = today_str
+                        logger.info(f"[{today_str} 05:00:00] 미국 증시 정규장 마감 스냅샷 스케줄러 트리거!")
+                        await self.snapshot_us_market_close_0500(today_str)
+                        
+                # 3-2. 15시 30분 정각 체크 (15:30:00 ~ 15:30:05 사이 실행, 당일 1회 한정)
+                if now.hour == 15 and now.minute == 30 and now.second <= 5:
+                    if self._last_1530_date != today_str:
+                        self._last_1530_date = today_str
+                        logger.info(f"[{today_str} 15:30:00] 미국 주식 데이마켓 스냅샷 스케줄러 트리거!")
+                        await self.snapshot_us_day_market_1530(today_str)
 
                 # 4. 08시 30분 ~ 08시 39분: 10초 주기 장전시간외 종가매수 실시간 체결 알림 검사
                 if now.hour == 8 and 30 <= now.minute < 40 and now.second % 10 == 0:
@@ -235,6 +251,91 @@ class ReservationManager:
                             f"[{symbol}] {qty}주 예약접수 실패: {msg_text}"
                         )
 
+    async def _get_target_reservation_etfs(self) -> set:
+        target_etfs = set()
+        for session_key, session in getattr(self.user_manager, "sessions", {}).items():
+            if not self._is_valid_kis_domestic_session(session):
+                continue
+            path = f"{session.account_path}/reservation_orders"
+            orders = self.fb.get_data(path)
+            if not isinstance(orders, dict): continue
+            for order in orders.values():
+                if isinstance(order, dict) and order.get("auto_cancel_enabled", False):
+                    status = order.get("status", "")
+                    if status in ["16시 전송완료", "08:20 전송대기", "08:20 접수완료", "대기중", "유지됨"] or "08시 유지됨" in status or "08시 자동취소됨" in status or "실패" in status:
+                        target_etfs.add(order.get("symbol", order.get("name", "")))
+        return target_etfs
+
+    async def snapshot_us_market_close_0500(self, today_str: str):
+        from engine.etf_analyzer import get_constituents_for_etf, fetch_stock_rate
+        target_etfs = await self._get_target_reservation_etfs()
+        if not target_etfs: return
+        
+        all_tickers = set()
+        for etf in target_etfs:
+            if not etf: continue
+            all_tickers.update(get_constituents_for_etf(etf))
+            
+        if not all_tickers: return
+            
+        logger.info(f"[05:00 Snapshot] Fetching close prices for {len(all_tickers)} US stocks...")
+        tasks = [fetch_stock_rate(t) for t in all_tickers]
+        results = await asyncio.gather(*tasks)
+        
+        snapshot = {}
+        for r in results:
+            if r["success"] and r["price"] > 0:
+                snapshot[r["symbol"]] = r["price"]
+                
+        if snapshot:
+            self.fb.set_data(f"system/us_snapshot/{today_str}_0500", snapshot)
+            logger.info(f"[05:00 Snapshot] Saved {len(snapshot)} prices to Firebase.")
+
+    async def snapshot_us_day_market_1530(self, today_str: str):
+        snapshot_0500 = self.fb.get_data(f"system/us_snapshot/{today_str}_0500")
+        if not isinstance(snapshot_0500, dict): snapshot_0500 = {}
+            
+        overseas_broker = None
+        for session_key, session in getattr(self.user_manager, "sessions", {}).items():
+            broker = getattr(session, "broker", None)
+            if broker and getattr(broker, "is_overseas", False) and not getattr(broker, "is_mock", False):
+                overseas_broker = broker
+                break
+        if not overseas_broker:
+            for session_key, session in getattr(self.user_manager, "sessions", {}).items():
+                broker = getattr(session, "broker", None)
+                if broker and getattr(broker, "is_overseas", False):
+                    overseas_broker = broker
+                    break
+
+        from engine.etf_analyzer import get_constituents_for_etf
+        target_etfs = await self._get_target_reservation_etfs()
+        all_tickers = set()
+        for etf in target_etfs:
+            if not etf: continue
+            all_tickers.update(get_constituents_for_etf(etf))
+            
+        tickers = list(all_tickers)
+        final_snapshot = {}
+        
+        if overseas_broker and tickers:
+            logger.info(f"[15:30 Snapshot] Fetching day market prices via KIS for {len(tickers)} stocks...")
+            kis_prices = await overseas_broker.fetch_rest_current_prices(tickers)
+            for t in tickers:
+                if t in kis_prices:
+                    price = kis_prices[t]
+                    if isinstance(price, tuple): price = price[0]
+                    if price > 0:
+                        final_snapshot[t] = price
+                        
+        for t in tickers:
+            if t not in final_snapshot and t in snapshot_0500:
+                final_snapshot[t] = snapshot_0500[t]
+                
+        if final_snapshot:
+            self.fb.set_data(f"system/us_snapshot/{today_str}_base_price", final_snapshot)
+            logger.info(f"[15:30 Snapshot] Saved base prices to Firebase (Fallback applied).")
+
     async def execute_reservations_0820(self):
         """매일 아침 08:20:00.050에 등록된 장전시간외종가 예약매수 증권사 대기열 발사 (ORD_DVSN: 05)"""
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
@@ -293,8 +394,18 @@ class ReservationManager:
                             f"[{symbol}] {qty}주 장전시간외 대기열 발송 실패: {msg_text}"
                         )
 
-    async def evaluate_and_cancel_0800(self):
+    async def evaluate_and_cancel_0800(self, today_str: str = None):
         """매일 08:00:00에 미국 증시 자동판단 ON인 주문들 평균 시세 검증 및 자동 취소"""
+        if not today_str:
+            KST = timezone(timedelta(hours=9))
+            today_str = datetime.now(KST).strftime("%Y-%m-%d")
+            
+        base_prices = self.fb.get_data(f"system/us_snapshot/{today_str}_base_price")
+        if not isinstance(base_prices, dict):
+            base_prices = self.fb.get_data(f"system/us_snapshot/{today_str}_0500")
+        if not isinstance(base_prices, dict):
+            base_prices = None
+
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
             if not self._is_valid_kis_domestic_session(session):
                 continue
@@ -318,7 +429,7 @@ class ReservationManager:
                     threshold = float(order.get("auto_cancel_threshold", 1.0))
                     
                     logger.info(f"[{session.uid}] 08시 미국 증시 자동판단 시작: {name}({symbol}) [기준값: {threshold}% 미만 시 취소]")
-                    avg_rate, _ = await analyze_etf_overnight_return(symbol if symbol else name)
+                    avg_rate, _ = await analyze_etf_overnight_return(symbol if symbol else name, base_prices=base_prices)
                     
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if avg_rate < threshold:

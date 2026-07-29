@@ -76,7 +76,7 @@ def get_constituents_for_etf(symbol_or_name: str, custom_tickers: Optional[List[
     logger.info(f"ETF '{symbol_or_name}'에 대한 특정 매핑이 없어 DEFAULT 구성종목을 사용합니다.")
     return ETF_CONSTITUENTS_MAP["DEFAULT"]
 
-def _fetch_stock_rate_sync(symbol: str) -> Dict:
+def _fetch_stock_rate_sync(symbol: str, base_price: Optional[float] = None) -> Dict:
     """
     urllib를 이용하여 야후 파이낸스 API에서 특정 미국 종목의 전일 대비 당일 등락률을 산출합니다.
     """
@@ -106,7 +106,11 @@ def _fetch_stock_rate_sync(symbol: str) -> Dict:
                 if curr <= 0:
                     curr = float(meta.get("postMarketPrice", meta.get("regularMarketPrice", 0.0)))
                 
-                prev = float(meta.get("chartPreviousClose", meta.get("previousClose", curr)))
+                if base_price is not None and base_price > 0:
+                    prev = base_price
+                else:
+                    prev = float(meta.get("chartPreviousClose", meta.get("previousClose", curr)))
+                    
                 if prev > 0 and curr > 0:
                     rate = ((curr - prev) / prev) * 100.0
                     return {
@@ -121,15 +125,15 @@ def _fetch_stock_rate_sync(symbol: str) -> Dict:
     
     return {"symbol": symbol, "price": 0.0, "prev_close": 0.0, "rate": 0.0, "success": False}
 
-async def fetch_stock_rate(symbol: str) -> Dict:
+async def fetch_stock_rate(symbol: str, base_price: Optional[float] = None) -> Dict:
     """
     동기 HTTP 호출을 스레드 풀에서 비동기로 실행합니다.
     """
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=5) as pool:
-        return await loop.run_in_executor(pool, _fetch_stock_rate_sync, symbol)
+        return await loop.run_in_executor(pool, _fetch_stock_rate_sync, symbol, base_price)
 
-async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Optional[List[str]] = None) -> Tuple[float, List[Dict]]:
+async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Optional[List[str]] = None, base_prices: Optional[Dict[str, float]] = None) -> Tuple[float, List[Dict]]:
     """
     해당 ETF를 구성하는 미국 상위 종목들(최대 10개 또는 10개 미만 시 전체)의 밤사이 시세 등락률을
     병렬로 조회한 뒤, 단순 산술평균 등락률과 상세 내역을 반환합니다.
@@ -137,7 +141,7 @@ async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Opti
     tickers = get_constituents_for_etf(symbol_or_name, custom_tickers)
     logger.info(f"[{symbol_or_name}] 구성종목 {len(tickers)}개 시세 분석 시작: {tickers}")
     
-    tasks = [fetch_stock_rate(t) for t in tickers]
+    tasks = [fetch_stock_rate(t, base_prices.get(t) if base_prices else None) for t in tickers]
     results = await asyncio.gather(*tasks)
         
     valid_rates = [r["rate"] for r in results if r["success"]]
