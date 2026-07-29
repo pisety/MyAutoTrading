@@ -250,7 +250,7 @@ class ReservationManager:
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
                 # 매일 아침 08:20 정각에 대기중이거나 이전일 유지/실패 상태였던 주문들을 대기열로 발사 (08시 자동취소됨은 제외!)
-                if status in ["대기중", "유지됨", "08시 유지됨", "16시 전송완료", "08:20 전송대기"] or "실패" in status:
+                if status in ["대기중", "유지됨", "16시 전송완료", "08:20 전송대기"] or "08시 유지됨" in status or "실패" in status:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
@@ -310,7 +310,7 @@ class ReservationManager:
                     continue
                 
                 status = order.get("status", "")
-                if status in ["16시 전송완료", "08:20 전송대기", "08:20 접수완료", "대기중", "유지됨", "08시 유지됨", "08시 자동취소됨"] or "실패" in status:
+                if status in ["16시 전송완료", "08:20 전송대기", "08:20 접수완료", "대기중", "유지됨"] or "08시 유지됨" in status or "08시 자동취소됨" in status or "실패" in status:
                     symbol = order.get("symbol", "")
                     name = order.get("name", symbol)
                     qty = int(float(order.get("quantity", 0)))
