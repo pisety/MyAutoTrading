@@ -388,7 +388,7 @@ fun ReservationManagementDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = if (order.status.contains("취소") || order.status.contains("실패")) 
+                                    containerColor = if ((order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패")) 
                                         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                                     else 
                                         MaterialTheme.colorScheme.surface
@@ -414,7 +414,8 @@ fun ReservationManagementDialog(
                                             color = when {
                                                 order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.primaryContainer
                                                 order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFFE8F5E9)
-                                                order.status.contains("취소") || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
+                                                order.status.contains("자동취소") -> Color(0xFFFFF3E0)
+                                                (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
                                                 else -> MaterialTheme.colorScheme.secondaryContainer
                                             },
                                             shape = MaterialTheme.shapes.small
@@ -467,7 +468,7 @@ fun ReservationManagementDialog(
                                             Switch(
                                                 checked = order.auto_cancel_enabled,
                                                 onCheckedChange = { onToggleAutoCancel(orderId, order.auto_cancel_enabled) },
-                                                enabled = !order.status.contains("취소")
+                                                enabled = !(order.status.contains("취소") && !order.status.contains("자동취소"))
                                             )
                                         }
 
@@ -475,7 +476,7 @@ fun ReservationManagementDialog(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            if (order.status.contains("취소") || order.status.contains("실패")) {
+                                            if ((order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패")) {
                                                 Button(
                                                     onClick = { onRestartOrder(orderId) },
                                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
