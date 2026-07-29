@@ -385,11 +385,8 @@ class UserSession:
                         status_update["last_updated"] = time.time()
                         status_update["auth_error"] = ""
                     else:
-                        status_update["total_balance"] = 0.0
-                        status_update["current_yield"] = 0.0
-                        status_update["holdings"] = {}
+                        # 일시적인 통신 오류나 API 한도 초과일 수 있으므로 기존 잔고를 0으로 초기화하지 않음
                         status_update["last_updated"] = time.time()
-                        status_update["auth_error"] = "API 키 인증에 실패했습니다. 키를 확인해 주세요."
 
                     self.fb.update_data(f"{self.account_path}/status", status_update)
                     self._last_balance_check = now
