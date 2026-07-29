@@ -41,6 +41,7 @@ data class TradingStatus(
     val avail_cash: Double = 0.0,
     val last_updated: String = "",
     val stock_prices: Map<String, Double> = emptyMap(),
+    val stock_prices_change: Map<String, Double> = emptyMap(),
     val stock_names: Map<String, String> = emptyMap(),
     val holding_stocks: Map<String, HoldingStock> = emptyMap(),
     val authError: String = ""

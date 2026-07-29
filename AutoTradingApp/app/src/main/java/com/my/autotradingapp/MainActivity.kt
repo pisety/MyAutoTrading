@@ -1100,10 +1100,12 @@ fun StockTradingScreen(
             } else {
                 items(watchSymbolsList) { symbol ->
                     val price = status.stock_prices[symbol] ?: 0.0
+                    val changeRate = status.stock_prices_change[symbol]
                     StockItem(
                         symbol = symbol,
                         name = status.stock_names[symbol] ?: symbol,
                         price = price,
+                        changeRate = changeRate,
                         isOverseas = isOverseas,
                         onBuyClick = { showOrderDialog = symbol to "BUY" }
                     )
@@ -2021,10 +2023,12 @@ fun CryptoTradingScreen(
             } else {
                 items(watchSymbolsList) { symbol ->
                     val price = status.stock_prices[symbol] ?: 0.0
+                    val changeRate = status.stock_prices_change[symbol]
                     StockItem(
                         symbol = symbol,
                         name = status.stock_names[symbol] ?: symbol,
                         price = price,
+                        changeRate = changeRate,
                         isOverseas = false,
                         onBuyClick = { showOrderDialog = symbol to "BUY" }
                     )
@@ -2187,6 +2191,7 @@ fun StockItem(
     symbol: String,
     name: String,
     price: Double,
+    changeRate: Double? = null,
     isOverseas: Boolean,
     onBuyClick: () -> Unit
 ) {
@@ -2208,7 +2213,18 @@ fun StockItem(
                 } else {
                     "로딩중..."
                 }
-                Text(text = priceStr, style = MaterialTheme.typography.bodyMedium)
+                
+                if (price > 0 && changeRate != null) {
+                    val sign = if (changeRate > 0) "+" else ""
+                    val color = if (changeRate > 0) Color(0xFFD32F2F) else if (changeRate < 0) Color(0xFF1976D2) else Color.Gray
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = priceStr, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "($sign${String.format(Locale.US, "%.2f", changeRate)}%)", style = MaterialTheme.typography.bodyMedium, color = color)
+                    }
+                } else {
+                    Text(text = priceStr, style = MaterialTheme.typography.bodyMedium)
+                }
             }
             Button(
                 onClick = onBuyClick,
