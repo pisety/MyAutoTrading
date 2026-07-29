@@ -251,6 +251,13 @@ class ReservationManager:
                             f"[{symbol}] {qty}주 예약접수 실패: {msg_text}"
                         )
 
+    def _get_etf_constituents_map(self) -> dict:
+        cmap = self.fb.get_data("system/etf_constituents")
+        if isinstance(cmap, dict) and cmap:
+            return cmap
+        from engine.etf_analyzer import ETF_CONSTITUENTS_MAP
+        return ETF_CONSTITUENTS_MAP
+
     async def _get_target_reservation_etfs(self) -> set:
         target_etfs = set()
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
@@ -271,10 +278,11 @@ class ReservationManager:
         target_etfs = await self._get_target_reservation_etfs()
         if not target_etfs: return
         
+        cmap = self._get_etf_constituents_map()
         all_tickers = set()
         for etf in target_etfs:
             if not etf: continue
-            all_tickers.update(get_constituents_for_etf(etf))
+            all_tickers.update(get_constituents_for_etf(etf, constituents_map=cmap))
             
         if not all_tickers: return
             
@@ -310,10 +318,11 @@ class ReservationManager:
 
         from engine.etf_analyzer import get_constituents_for_etf
         target_etfs = await self._get_target_reservation_etfs()
+        cmap = self._get_etf_constituents_map()
         all_tickers = set()
         for etf in target_etfs:
             if not etf: continue
-            all_tickers.update(get_constituents_for_etf(etf))
+            all_tickers.update(get_constituents_for_etf(etf, constituents_map=cmap))
             
         tickers = list(all_tickers)
         final_snapshot = {}
@@ -440,7 +449,8 @@ class ReservationManager:
                     threshold = float(order.get("auto_cancel_threshold", 1.0))
                     
                     logger.info(f"[{session.uid}] 08시 미국 증시 자동판단 시작: {name}({symbol}) [기준값: {threshold}% 미만 시 취소]")
-                    avg_rate, _ = await analyze_etf_overnight_return(symbol if symbol else name, base_prices=base_prices)
+                    cmap = self._get_etf_constituents_map()
+                    avg_rate, _ = await analyze_etf_overnight_return(symbol if symbol else name, base_prices=base_prices, constituents_map=cmap)
                     
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if avg_rate < threshold:

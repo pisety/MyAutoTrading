@@ -57,24 +57,26 @@ ETF_CONSTITUENTS_MAP = {
     "DEFAULT": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "AMD", "QCOM"]
 }
 
-def get_constituents_for_etf(symbol_or_name: str, custom_tickers: Optional[List[str]] = None) -> List[str]:
+def get_constituents_for_etf(symbol_or_name: str, custom_tickers: Optional[List[str]] = None, constituents_map: Optional[Dict[str, List[str]]] = None) -> List[str]:
     """
     ETF 종목코드 또는 종목명을 기반으로 상위 구성종목 티커 리스트를 반환합니다.
     """
     if custom_tickers and len(custom_tickers) > 0:
         return custom_tickers
         
+    mapping = constituents_map if constituents_map else ETF_CONSTITUENTS_MAP
+        
     s = symbol_or_name.upper().strip()
-    if s in ETF_CONSTITUENTS_MAP:
-        return ETF_CONSTITUENTS_MAP[s]
+    if s in mapping:
+        return mapping[s]
         
     # 키워드 매칭
-    for key, tickers in ETF_CONSTITUENTS_MAP.items():
+    for key, tickers in mapping.items():
         if key in s:
             return tickers
             
     logger.info(f"ETF '{symbol_or_name}'에 대한 특정 매핑이 없어 DEFAULT 구성종목을 사용합니다.")
-    return ETF_CONSTITUENTS_MAP["DEFAULT"]
+    return mapping.get("DEFAULT", ETF_CONSTITUENTS_MAP["DEFAULT"])
 
 def _fetch_stock_rate_sync(symbol: str, base_price: Optional[float] = None) -> Dict:
     """
@@ -133,12 +135,12 @@ async def fetch_stock_rate(symbol: str, base_price: Optional[float] = None) -> D
     with ThreadPoolExecutor(max_workers=5) as pool:
         return await loop.run_in_executor(pool, _fetch_stock_rate_sync, symbol, base_price)
 
-async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Optional[List[str]] = None, base_prices: Optional[Dict[str, float]] = None) -> Tuple[float, List[Dict]]:
+async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Optional[List[str]] = None, base_prices: Optional[Dict[str, float]] = None, constituents_map: Optional[Dict[str, List[str]]] = None) -> Tuple[float, List[Dict]]:
     """
     해당 ETF를 구성하는 미국 상위 종목들(최대 10개 또는 10개 미만 시 전체)의 밤사이 시세 등락률을
     병렬로 조회한 뒤, 단순 산술평균 등락률과 상세 내역을 반환합니다.
     """
-    tickers = get_constituents_for_etf(symbol_or_name, custom_tickers)
+    tickers = get_constituents_for_etf(symbol_or_name, custom_tickers, constituents_map=constituents_map)
     logger.info(f"[{symbol_or_name}] 구성종목 {len(tickers)}개 시세 분석 시작: {tickers}")
     
     tasks = [fetch_stock_rate(t, base_prices.get(t) if base_prices else None) for t in tickers]
