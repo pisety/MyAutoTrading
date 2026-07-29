@@ -30,6 +30,7 @@ class UserSession:
         self.stock_names: Dict[str, str] = {}
         
         self.price_data: Dict[str, float] = {}
+        self.price_change_data: Dict[str, float] = {}
         self.price_history: Dict[str, deque] = {}
         self.last_surge_buy_time: Dict[str, float] = {}
         
@@ -128,7 +129,6 @@ class UserSession:
         if active_id and active_id in self.account_data.saved_accounts:
             acc = self.account_data.saved_accounts[active_id]
             if acc.broker == "KIS" or acc.broker == "한국투자":
-                # 기존 브로커가 있으면 웹소켓 종료를 예약
                 if self.broker:
                     self._loop.create_task(self.broker.close_websocket())
                     
@@ -138,14 +138,13 @@ class UserSession:
                 self.broker = KISBroker(decrypted_key, decrypted_secret, acc.account_number, is_mock=is_mock, is_overseas=acc.is_overseas)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}, OS: {acc.is_overseas}")
                 
-                # 기존 가격 정보 복원 (장이 닫혀있을 때 UI 빈화면 방지)
                 status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
                         if sym in self.settings.watch_symbols:
                             self.price_data[sym] = float(p)
                         
-                self._last_balance_check = 0.0 # Force immediate balance update
+                self._last_balance_check = 0.0 
                 self._restart_websocket()
             elif acc.broker == "키움" or acc.broker == "Kiwoom":
                 if self.broker:
@@ -157,7 +156,6 @@ class UserSession:
                 self.broker = KiwoomBroker(decrypted_key, decrypted_secret, acc.account_number, is_mock=is_mock)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}")
                 
-                # 기존 가격 정보 복원
                 status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
@@ -174,7 +172,6 @@ class UserSession:
                 self.broker = UpbitBroker(decrypted_key, decrypted_secret)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id})")
 
-                # 기존 가격 정보 복원
                 status_data = self.fb.get_data(f"{self.account_path}/status")
                 if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
                     for sym, p in status_data["stock_prices"].items():
@@ -189,7 +186,6 @@ class UserSession:
                     self._loop.create_task(self.broker.close_websocket())
                     self.broker = None
                 
-                # Clear Firebase status so UI knows it's inactive
                 self.price_data.clear()
                 
                 self.fb.update_data(f"{self.account_path}/status", {
@@ -210,38 +206,43 @@ class UserSession:
         symbols = self._get_active_symbols()
             
         if symbols:
-            # WebSocket 이벤트가 발생하기 전 UI가 "로딩중"에 머무는 것을 방지하기 위해 초기 시세 강제 조회
             try:
                 initial_prices = await self.broker.fetch_rest_current_prices(symbols)
                 logger.info(f"initial_prices for {symbols}: {initial_prices}")
                 for sym, price in initial_prices.items():
-                    self.price_data[sym] = price
+                    if isinstance(price, (tuple, list)):
+                        self._on_ws_price(sym, price[0], price[1])
+                    else:
+                        self.price_data[sym] = price
             except Exception as e:
                 logger.error(f"Failed to fetch initial prices via REST: {e}")
                 
             await self.broker.connect_websocket(symbols, self._on_ws_price)
 
-    def _on_ws_price(self, symbol: str, price: float):
+    def _on_ws_price(self, symbol: str, price: float, change_rate: float = None):
+        if not symbol: return
         self.price_data[symbol] = price
+        if change_rate is not None:
+            self.price_change_data[symbol] = round(change_rate, 2)
+            
         if symbol not in self.price_history:
             self.price_history[symbol] = deque(maxlen=120)
         self.price_history[symbol].append((time.time(), price))
 
     def _on_settings_change(self, event):
         if event.data is not None:
-            # To avoid thread issues, schedule on loop
             self._loop.call_soon_threadsafe(self._handle_settings_update)
             
     def _handle_settings_update(self):
         self._load_settings()
         
-        # 삭제된 감시종목에 대한 유령 캐시 지우기
         active_symbols = self._get_active_symbols()
         removed_symbols = [s for s in self.price_data.keys() if s not in active_symbols]
         if removed_symbols:
             logger.info(f"Removing ghost symbols: {removed_symbols} from {list(self.price_data.keys())} vs {active_symbols}")
         for s in removed_symbols:
             self.price_data.pop(s, None)
+            self.price_change_data.pop(s, None)
             
         self._last_rest_price = 0.0
         self._restart_websocket()
@@ -260,8 +261,8 @@ class UserSession:
             self.active_account_id = new_id
             self._load_settings()
             
-            # Reset local state for new account
             self.price_data.clear()
+            self.price_change_data.clear()
             self.price_history.clear()
             self.stock_names.clear()
             
@@ -281,7 +282,6 @@ class UserSession:
         if not self.broker:
             return
         
-        # 사용자가 입력한 가격이 없거나 0이면 현재가 사용
         if not price or price <= 0.0:
             price = self.price_data.get(sym)
             
@@ -350,12 +350,10 @@ class UserSession:
         while self._running:
             try:
                 now = time.time()
-                # logger.info(f"[{self.base_path}] Loop tick")
                 if now - last_sync >= 1.0:
                     kst = timezone(timedelta(hours=9))
-                    if "crypto" in self.base_path:
-                        logger.info(f"Writing to Firebase {self.account_path}/status/stock_prices: {self.price_data}")
                     self.fb.set_data(f"{self.account_path}/status/stock_prices", self.price_data)
+                    self.fb.set_data(f"{self.account_path}/status/stock_prices_change", self.price_change_data)
                     if self.stock_names:
                         self.fb.update_data(f"{self.account_path}/status/stock_names", self.stock_names)
                     self.fb.set_data(f"{self.account_path}/status/last_updated", datetime.now(kst).isoformat())
@@ -401,8 +399,11 @@ class UserSession:
                     
                     if stale_symbols:
                         rest_prices = await self.broker.fetch_rest_current_prices(stale_symbols)
-                        for sym, price in rest_prices.items():
-                            self._on_ws_price(sym, price)
+                        for sym, data in rest_prices.items():
+                            if isinstance(data, tuple) and len(data) >= 2:
+                                self._on_ws_price(sym, data[0], data[1])
+                            else:
+                                self._on_ws_price(sym, float(data))
                                 
                     self._last_rest_price = now
                         

@@ -143,11 +143,10 @@ class UpbitBroker(BaseBroker):
                 for c in coin_entries:
                     market = f"KRW-{c['currency']}"
                     
-                    # 상장폐지되거나 원화 마켓에서 지원하지 않아 현재가를 알 수 없는 코인은 가치를 0으로 평가
                     if market not in current_prices:
                         current_price = 0.0
                     else:
-                        current_price = current_prices[market]
+                        current_price = current_prices[market][0] if isinstance(current_prices[market], tuple) else current_prices[market]
                         
                     qty = c["total_qty"]
                     avg_price = c["avg_buy_price"]
@@ -192,7 +191,7 @@ class UpbitBroker(BaseBroker):
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as res:
                     if res.status == 200:
                         data = await res.json()
-                        return {item["market"]: float(item["trade_price"]) for item in data}
+                        return {item["market"]: (float(item["trade_price"]), float(item.get("signed_change_rate", 0))*100.0) for item in data}
                     elif res.status == 404:
                         logger.warning("Upbit ticker bulk fetch 404. Falling back to individual fetch to skip delisted coins.")
                         for m in markets:
@@ -201,7 +200,7 @@ class UpbitBroker(BaseBroker):
                                     if single_res.status == 200:
                                         data = await single_res.json()
                                         if data and len(data) > 0:
-                                            prices[data[0]["market"]] = float(data[0]["trade_price"])
+                                            prices[data[0]["market"]] = (float(data[0]["trade_price"]), float(data[0].get("signed_change_rate", 0))*100.0)
                                     else:
                                         logger.debug(f"Skip market {m}: HTTP {single_res.status}")
                             except Exception as ex:
@@ -361,11 +360,14 @@ class UpbitBroker(BaseBroker):
                                     data = json.loads(message)
                                 else:
                                     continue
-
-                                code = data.get("code")
-                                trade_price = data.get("trade_price")
-                                if code and trade_price is not None and self._on_message_callback:
-                                    self._on_message_callback(code, float(trade_price))
+                                
+                                if data.get("type") == "ticker":
+                                    sym = data.get("code", "")
+                                    price = float(data.get("trade_price", 0.0))
+                                    chg = float(data.get("signed_change_rate", 0.0)) * 100.0
+                                    if sym and price > 0:
+                                        if self._on_message_callback:
+                                            self._on_message_callback(sym, price, chg)
                             except (json.JSONDecodeError, KeyError) as e:
                                 logger.debug(f"Upbit WS parse error: {e}")
 

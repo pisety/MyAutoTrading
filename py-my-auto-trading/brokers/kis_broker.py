@@ -432,9 +432,12 @@ class KISBroker(BaseBroker):
                                 if res.status == 200:
                                     data = await res.json()
                                     if "chart" in data and "result" in data["chart"] and data["chart"]["result"]:
-                                        price = data["chart"]["result"][0]["meta"].get("regularMarketPrice")
+                                        meta = data["chart"]["result"][0]["meta"]
+                                        price = meta.get("regularMarketPrice")
+                                        prev_close = meta.get("previousClose")
                                         if price:
-                                            result[sym] = float(price)
+                                            chg = ((float(price) - float(prev_close)) / float(prev_close) * 100) if prev_close and float(prev_close) > 0 else 0.0
+                                            result[sym] = (float(price), chg)
                                             found = True
                                             logger.info(f"Successfully fetched price for {sym} from Yahoo Finance: {price}")
                         except Exception as e:
@@ -451,8 +454,9 @@ class KISBroker(BaseBroker):
                             if data.get("rt_cd") == "0":
                                 output = data.get("output", {})
                                 price_str = output.get("stck_prpr", "")
+                                chg_str = output.get("prdy_ctrt", "0")
                                 if price_str:
-                                    result[sym] = float(price_str)
+                                    result[sym] = (float(price_str), float(chg_str))
                             else:
                                 logger.debug(f"Domestic REST fetch miss {sym}: {data.get('msg1')}")
                     except Exception as e:
@@ -574,14 +578,16 @@ class KISBroker(BaseBroker):
                                     if self.is_overseas and len(fields) >= 12:
                                         tk = fields[0]
                                         price_str = fields[11]
+                                        chg_str = fields[14] if len(fields) > 14 else "0"
                                         sym = tk[4:] if tk.startswith("DNAS") or tk.startswith("DNYO") or tk.startswith("DAMS") else tk
                                         if price_str and self._on_message_callback:
-                                            self._on_message_callback(sym, float(price_str))
+                                            self._on_message_callback(sym, float(price_str), float(chg_str))
                                     elif not self.is_overseas and len(fields) >= 3:
                                         sym = fields[0]
                                         price_str = fields[2]
+                                        chg_str = fields[5] if len(fields) > 5 else "0"
                                         if price_str and self._on_message_callback:
-                                            self._on_message_callback(sym, float(price_str))
+                                            self._on_message_callback(sym, float(price_str), float(chg_str))
                 except Exception as e:
                     logger.error(f"WebSocket error: {e}")
                     self.ws_connection = None
