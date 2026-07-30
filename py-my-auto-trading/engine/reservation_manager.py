@@ -457,22 +457,14 @@ class ReservationManager:
                     
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if avg_rate < threshold:
-                        logger.info(f"[{session.uid}] {name} 산술평균 등락률({avg_rate:.2f}%) < 기준값({threshold}%) ➔ 자동 취소 실행!")
-                        if order_no and session.broker:
-                            c_succ, c_msg = await session.broker.cancel_domestic_order(
-                                order_no=order_no, symbol=symbol, qty=qty, ord_dvsn="05"
-                            )
-                            if c_succ:
-                                self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
-                            else:
-                                self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨(증권사취소실패:{c_msg}) (평균 {avg_rate:.2f}%)")
-                        else:
-                            self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
+                        logger.info(f"[{session.uid}] {name} 산술평균 등락률({avg_rate:.2f}%) < 기준값({threshold}%) ➔ 자동 취소 실행 (Firebase 상태 업데이트)!")
+                        self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
                         self.fb.send_push_notification(
                             session.uid,
                             "🇺🇸 08시 미국 증시 자동 취소 발동",
                             f"[{name}({symbol})] 산술평균({avg_rate:.2f}%) < 기준치({threshold}%) ➔ 예약매수 자동 취소됨!"
                         )
+                        await asyncio.sleep(1) # 푸시 알림 가드 타임
                     else:
                         logger.info(f"[{session.uid}] {name} 산술평균 등락률({avg_rate:.2f}%) >= 기준값({threshold}%) ➔ 주문 유지!")
                         self.fb.set_data(f"{path}/{order_id}/status", f"08시 유지됨 (평균 {avg_rate:.2f}%)")
@@ -481,6 +473,7 @@ class ReservationManager:
                             "🇺🇸 08시 미국 증시 예약매수 유지",
                             f"[{name}({symbol})] 산술평균({avg_rate:.2f}%) ≥ 기준치({threshold}%) ➔ 예약매수 정상 유지(08:20 전송 예정)!"
                         )
+                        await asyncio.sleep(1) # 푸시 알림 가드 타임
                     
                     self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
 
