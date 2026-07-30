@@ -94,5 +94,21 @@ class FirebaseClient:
             )
             response = messaging.send(message)
             logger.info(f"Successfully sent push notification to {user_id}: {response}")
+            
+            # 3. 알림 이력 저장
+            try:
+                import time
+                timestamp = int(time.time() * 1000)
+                notif_data = {
+                    "title": title,
+                    "body": body,
+                    "timestamp": timestamp,
+                    "read": False
+                }
+                from firebase_admin import db
+                db.reference(f"users/{user_id}/notifications").push(notif_data)
+            except Exception as e:
+                logger.error(f"Failed to save push notification history to DB: {e}")
+                
         except Exception as e:
             logger.error(f"Failed to send push notification to {user_id}: {e}")
