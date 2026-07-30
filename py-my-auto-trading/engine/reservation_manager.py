@@ -359,8 +359,11 @@ class ReservationManager:
             for order_id, order in orders.items():
                 if not isinstance(order, dict): continue
                 status = order.get("status", "")
-                # 매일 아침 08:20 정각에 대기중이거나 이전일 유지/실패 상태였던 주문들을 대기열로 발사 (08시 자동취소됨은 제외!)
-                if status in ["대기중", "유지됨", "16시 전송완료", "08:20 전송대기"] or "08시 유지됨" in status or "실패" in status:
+                if "취소" in status:
+                    continue
+                
+                # 매일 아침 08:20 정각에 대기중이거나 이전일 유지/실패 상태였던 주문들을 대기열로 발사
+                if status in ["대기중", "유지됨", "16시 전송완료", "08:20 전송대기"] or "08시 유지됨" in status or "전송실패" in status:
                     symbol = order.get("symbol", "")
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
@@ -462,7 +465,7 @@ class ReservationManager:
                             if c_succ:
                                 self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
                             else:
-                                self.fb.set_data(f"{path}/{order_id}/status", f"취소요청실패({c_msg}) (평균 {avg_rate:.2f}%)")
+                                self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨(증권사취소실패:{c_msg}) (평균 {avg_rate:.2f}%)")
                         else:
                             self.fb.set_data(f"{path}/{order_id}/status", f"08시 자동취소됨 (평균 {avg_rate:.2f}%)")
                         self.fb.send_push_notification(
