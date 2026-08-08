@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -383,7 +384,7 @@ fun ReservationManagementDialog(
                             modifier = Modifier.fillMaxWidth().weight(1f),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(reservationOrders.entries.sortedByDescending { it.value.last_updated }.toList()) { (orderId, order) ->
+                            items(reservationOrders.entries.sortedByDescending { it.value.lastUpdated }.toList()) { (orderId, order) ->
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -410,18 +411,20 @@ fun ReservationManagementDialog(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
+                                        val isDark = isSystemInDarkTheme()
+                                        
                                         val badgeBgColor = when {
                                             order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.primaryContainer
-                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFFE8F5E9)
-                                            order.status.contains("자동취소") -> Color(0xFFFFF3E0)
+                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> if (isDark) Color(0xFF1B5E20) else Color(0xFFE8F5E9)
+                                            order.status.contains("자동취소") -> if (isDark) Color(0xFF5D4037) else Color(0xFFFFF3E0)
                                             (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.errorContainer
                                             else -> MaterialTheme.colorScheme.secondaryContainer
                                         }
                                         
                                         val badgeTextColor = when {
                                             order.status == "대기중" || order.status.contains("전송대기") -> MaterialTheme.colorScheme.onPrimaryContainer
-                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> Color(0xFF1B5E20)
-                                            order.status.contains("자동취소") -> Color(0xFFE65100)
+                                            order.status.contains("전송완료") || order.status.contains("접수완료") || order.status.contains("체결") -> if (isDark) Color(0xFFA5D6A7) else Color(0xFF1B5E20)
+                                            order.status.contains("자동취소") -> if (isDark) Color(0xFFFFCC80) else Color(0xFFE65100)
                                             (order.status.contains("취소") && !order.status.contains("자동취소")) || order.status.contains("실패") || order.status.contains("미체결") -> MaterialTheme.colorScheme.onErrorContainer
                                             else -> MaterialTheme.colorScheme.onSecondaryContainer
                                         }
@@ -447,14 +450,14 @@ fun ReservationManagementDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text("매수 수량: ${NumberFormat.getNumberInstance(Locale.US).format(order.quantity)}주", fontSize = 13.sp)
-                                        if (order.order_no.isNotBlank()) {
-                                            Text("주문번호: ${order.order_no}", fontSize = 12.sp, color = Color.Gray)
+                                        if (order.orderNo.isNotBlank()) {
+                                            Text("주문번호: ${order.orderNo}", fontSize = 12.sp, color = Color.Gray)
                                         }
                                     }
 
-                                    if (order.auto_cancel_enabled) {
+                                    if (order.autoCancelEnabled) {
                                         Text(
-                                            "🇺🇸 미국 증시 자동판단: 산술평균 +${order.auto_cancel_threshold}% 미만 시 취소", 
+                                            "🇺🇸 미국 증시 자동판단: 산술평균 +${order.autoCancelThreshold}% 미만 시 취소", 
                                             fontSize = 12.sp, 
                                             color = MaterialTheme.colorScheme.secondary,
                                             fontWeight = FontWeight.Medium
@@ -477,8 +480,8 @@ fun ReservationManagementDialog(
                                         ) {
                                             Text("자동취소:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             Switch(
-                                                checked = order.auto_cancel_enabled,
-                                                onCheckedChange = { onToggleAutoCancel(orderId, order.auto_cancel_enabled) },
+                                                checked = order.autoCancelEnabled,
+                                                onCheckedChange = { onToggleAutoCancel(orderId, order.autoCancelEnabled) },
                                                 enabled = !(order.status.contains("취소") && !order.status.contains("자동취소"))
                                             )
                                         }
