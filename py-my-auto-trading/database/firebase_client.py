@@ -1,8 +1,9 @@
 import os
+import time
 import logging
 from typing import Callable, Dict, Any
 import firebase_admin
-from firebase_admin import credentials, db
+from firebase_admin import credentials, db, messaging
 
 logger = logging.getLogger("FirebaseClient")
 
@@ -77,7 +78,6 @@ class FirebaseClient:
 
     def send_push_notification(self, user_id: str, title: str, body: str):
         try:
-            from firebase_admin import messaging
             # 1. FCM Token 조회
             token = self.get_data(f"users/{user_id}/fcm_token")
             if not token:
@@ -97,7 +97,6 @@ class FirebaseClient:
             
             # 3. 알림 이력 저장
             try:
-                import time
                 timestamp = int(time.time() * 1000)
                 notif_data = {
                     "title": title,
