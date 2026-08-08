@@ -1,5 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple, List, Callable, Any
+import os
+import logging
+import json
+
+logger = logging.getLogger("Broker")
 
 class BaseBroker(ABC):
     def __init__(self, app_key: str, app_secret: str, account_number: str, is_mock: bool = False):
@@ -9,6 +14,30 @@ class BaseBroker(ABC):
         self.is_mock = is_mock
         self.access_token = ""
         self.token_expires_at = 0.0
+
+    def _get_token_cache_path(self) -> str:
+        """Returns the path for the token cache file"""
+        # Use a class attribute or property that subclasses define
+        return getattr(self, '_token_cache_filename', f'.token_cache_{self.__class__.__name__}.json')
+
+    def _save_token_cache(self, token_data: dict):
+        """Save token data to cache file"""
+        try:
+            with open(self._get_token_cache_path(), 'w') as f:
+                json.dump(token_data, f)
+        except Exception:
+            logger.warning(f"Failed to save token cache: {self._get_token_cache_path()}")
+
+    def _load_token_cache(self) -> Optional[dict]:
+        """Load token data from cache file"""
+        try:
+            cache_path = self._get_token_cache_path()
+            if os.path.exists(cache_path):
+                with open(cache_path, 'r') as f:
+                    return json.load(f)
+        except Exception:
+            logger.warning(f"Failed to load token cache: {self._get_token_cache_path()}")
+        return None
 
     @abstractmethod
     async def ensure_valid_token(self) -> bool:
