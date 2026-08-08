@@ -16,6 +16,13 @@ import crypto_utils
 
 logger = logging.getLogger("UserSession")
 
+def _task_error_callback(task: asyncio.Task):
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Background task failed: {exc}", exc_info=exc)
+
 class UserSession:
     def __init__(self, uid: str, fb_client: FirebaseClient, service_type: str = "stock"):
         self.uid = uid
@@ -88,6 +95,7 @@ class UserSession:
         
         # Start async loop
         self._main_task = asyncio.create_task(self._session_loop())
+        self._main_task.add_done_callback(_task_error_callback)
 
     async def stop(self):
         logger.info(f"Stopping session for user: {self.uid}")
@@ -124,13 +132,20 @@ class UserSession:
         logger.info(f"ACTIVE SYMBOLS: {symbols}")
         return list(symbols)
 
+    def _load_initial_price_data(self):
+        status_data = self.fb.get_data(f"{self.account_path}/status")
+        if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
+            for sym, p in status_data["stock_prices"].items():
+                if sym in self.settings.watch_symbols:
+                    self.price_data[sym] = float(p)
+
     def _setup_broker(self):
         active_id = self.account_data.active_account_id
         if active_id and active_id in self.account_data.saved_accounts:
             acc = self.account_data.saved_accounts[active_id]
             if acc.broker == "KIS" or acc.broker == "한국투자":
                 if self.broker:
-                    self._loop.create_task(self.broker.close_websocket())
+                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
                     
                 is_mock = getattr(acc, "is_mock", getattr(acc, "is_kis_mock", False))
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
@@ -138,17 +153,13 @@ class UserSession:
                 self.broker = KISBroker(decrypted_key, decrypted_secret, acc.account_number, is_mock=is_mock, is_overseas=acc.is_overseas)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}, OS: {acc.is_overseas}")
                 
-                status_data = self.fb.get_data(f"{self.account_path}/status")
-                if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
-                    for sym, p in status_data["stock_prices"].items():
-                        if sym in self.settings.watch_symbols:
-                            self.price_data[sym] = float(p)
+                self._load_initial_price_data()
                         
                 self._last_balance_check = 0.0 
                 self._restart_websocket()
             elif acc.broker == "키움" or acc.broker == "Kiwoom":
                 if self.broker:
-                    self._loop.create_task(self.broker.close_websocket())
+                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
                 is_mock = getattr(acc, "is_mock", True)
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
                 decrypted_secret = crypto_utils.decrypt(acc.app_secret).strip() if acc.app_secret else ""
@@ -156,34 +167,26 @@ class UserSession:
                 self.broker = KiwoomBroker(decrypted_key, decrypted_secret, acc.account_number, is_mock=is_mock)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}")
                 
-                status_data = self.fb.get_data(f"{self.account_path}/status")
-                if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
-                    for sym, p in status_data["stock_prices"].items():
-                        if sym in self.settings.watch_symbols:
-                            self.price_data[sym] = float(p)
+                self._load_initial_price_data()
                             
                 self._last_balance_check = 0.0
                 self._restart_websocket()
             elif acc.broker in ("업비트", "Upbit"):
                 if self.broker:
-                    self._loop.create_task(self.broker.close_websocket())
+                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
                 decrypted_secret = crypto_utils.decrypt(acc.app_secret).strip() if acc.app_secret else ""
                 self.broker = UpbitBroker(decrypted_key, decrypted_secret)
                 logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id})")
 
-                status_data = self.fb.get_data(f"{self.account_path}/status")
-                if status_data and isinstance(status_data, dict) and "stock_prices" in status_data:
-                    for sym, p in status_data["stock_prices"].items():
-                        if sym in self.settings.watch_symbols:
-                            self.price_data[sym] = float(p)
+                self._load_initial_price_data()
 
                 self._last_balance_check = 0.0
                 self._restart_websocket()
             else:
                 logger.info(f"[{self.uid}] Unsupported broker selected: {acc.broker}")
                 if self.broker:
-                    self._loop.create_task(self.broker.close_websocket())
+                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
                     self.broker = None
                 
                 self.price_data.clear()
@@ -200,6 +203,7 @@ class UserSession:
             if self._restart_task and not self._restart_task.done():
                 self._restart_task.cancel()
             self._restart_task = self._loop.create_task(self._do_restart_websocket())
+            self._restart_task.add_done_callback(_task_error_callback)
 
     async def _do_restart_websocket(self):
         await self.broker.close_websocket()
@@ -516,7 +520,7 @@ class UserSession:
                     last_buy = self.last_surge_buy_time.get(sym, 0)
                     if time.time() - last_buy > 60: # 60s cooldown
                         logger.info(f"[{self.uid}] Surge detected on {sym} ({sym_cfg.time_window_seconds}s, {sym_cfg.surge_percent_threshold}%): {surge_pct:.2f}%. Triggering BUY order.")
-                        self._loop.create_task(self._execute_surge_buy(sym, sym_cfg.buy_quantity, latest_p, cfg.allow_extended_hours, i))
+                        self._loop.create_task(self._execute_surge_buy(sym, sym_cfg.buy_quantity, latest_p, cfg.allow_extended_hours, i)).add_done_callback(_task_error_callback)
                         # Only trigger once per symbol per cycle, break out of config loop to respect cooldown
                         break
 

@@ -24,23 +24,28 @@ class KiwoomBroker(BaseBroker):
         
         self.ws = None
         self.ws_session = None
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def _get_access_token(self):
         now = time.time()
         if self.access_token and (self.token_expired_at - now > 3600):
             return self.access_token
             
-        token_file = f".kiwoom_token_{self.app_key[:10] if self.app_key else 'default'}.json"
-        try:
-            if os.path.exists(token_file):
-                with open(token_file, 'r') as f:
-                    cache = json.load(f)
-                    if cache.get("access_token") and (cache.get("token_expires_at", 0) - now > 3600):
-                        self.access_token = cache["access_token"]
-                        self.token_expired_at = cache["token_expires_at"]
-                        return self.access_token
-        except Exception:
-            pass
+        self._token_cache_filename = f".kiwoom_token_{self.app_key[:10] if self.app_key else 'default'}.json"
+        cache = self._load_token_cache()
+        if cache and cache.get("access_token") and (cache.get("token_expires_at", 0) - now > 3600):
+            self.access_token = cache["access_token"]
+            self.token_expired_at = cache["token_expires_at"]
+            return self.access_token
 
         url = f"{self.base_url}/oauth2/token"
         headers = {"Content-Type": "application/json;charset=UTF-8", "User-Agent": "Mozilla/5.0"}
@@ -51,8 +56,8 @@ class KiwoomBroker(BaseBroker):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=data, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=data, timeout=10) as resp:
                     if resp.status == 200:
                         res = await resp.json()
                         self.access_token = res.get("token")
@@ -68,13 +73,12 @@ class KiwoomBroker(BaseBroker):
                         else:
                             self.token_expired_at = now + 86400
                         
-                        try:
-                            with open(token_file, 'w') as f:
-                                json.dump({"access_token": self.access_token, "token_expires_at": self.token_expired_at}, f)
-                        except Exception:
-                            pass
+                        self._save_token_cache({
+                            "access_token": self.access_token,
+                            "token_expires_at": self.token_expired_at
+                        })
                             
-                        logger.info(f"Kiwoom Access Token 諛쒓툒 ?깃났: {self.account_number}")
+                        logger.info(f"Kiwoom Access Token 발급 성공: {self.account_number}")
                         return self.access_token
                     else:
                         text = await resp.text()
@@ -110,8 +114,8 @@ class KiwoomBroker(BaseBroker):
         body_18 = {"qry_tp": "1", "dmst_stex_tp": "KRX"}
         
         try:
-            async with aiohttp.ClientSession() as session:
-                task_04 = session.post(url_acnt, headers=headers_04, json=body_04, timeout=10)
+            session = await self._get_session()
+            task_04 = session.post(url_acnt, headers=headers_04, json=body_04, timeout=10)
                 task_18 = session.post(url_acnt, headers=headers_18, json=body_18, timeout=10)
                 resp_04, resp_18 = await asyncio.gather(task_04, task_18)
                 
@@ -149,8 +153,8 @@ class KiwoomBroker(BaseBroker):
         body_18 = {"qry_tp": "1", "dmst_stex_tp": "KRX"}
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url_acnt, headers=headers_18, json=body_18, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.post(url_acnt, headers=headers_18, json=body_18, timeout=10) as resp:
                     if resp.status == 200:
                         res = await resp.json()
                         result = {}
@@ -190,8 +194,8 @@ class KiwoomBroker(BaseBroker):
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=body, timeout=10) as resp:
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=body, timeout=10) as resp:
                     res = await resp.json()
                     if resp.status == 200 and res.get("return_code") == 0:
                         ord_no = res.get("ord_no")
@@ -239,8 +243,8 @@ class KiwoomBroker(BaseBroker):
             return symbol, None
 
         results = {}
-        async with aiohttp.ClientSession() as session:
-            tasks = [fetch_single(session, sym) for sym in symbols]
+        session = await self._get_session()
+        tasks = [fetch_single(session, sym) for sym in symbols]
             responses = await asyncio.gather(*tasks)
             for sym, data in responses:
                 if data is not None:

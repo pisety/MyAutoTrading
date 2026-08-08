@@ -1,4 +1,4 @@
-import time
+import asyncio
 import logging
 from engine.laore_calculator import calculate_daily_orders
 from engine.laore_scheduler import LaoreScheduler
@@ -13,11 +13,13 @@ class LaoreEngineManager:
         self.get_price_fn = get_price_fn
         self.execute_order_fn = execute_order_fn
         self.tracker = LaoreExecutionTracker(db.reference(f'users/{uid}/stock/laore_orders'))
-        self.scheduler = LaoreScheduler(self.execute_scheduled_orders)
+        def _sync_wrapper(market_type):
+            asyncio.create_task(self.execute_scheduled_orders(market_type))
+        self.scheduler = LaoreScheduler(_sync_wrapper)
         self.scheduler.schedule_tasks()
         logger.info(f"LaoreEngineManager initialized for UID: {uid}")
 
-    def execute_scheduled_orders(self, market_type):
+    async def execute_scheduled_orders(self, market_type):
         logger.info(f"Triggered Laore Execution for {market_type} market")
         settings_ref = self.db.reference(f'users/{self.uid}/stock/laore_settings')
         settings_map = settings_ref.get()
@@ -46,11 +48,11 @@ class LaoreEngineManager:
             
             for buy_ord in orders['buy']:
                 self.execute_order_fn(symbol, "BUY", buy_ord['qty'], buy_ord['price'], ord_dvsn=loc_code)
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
                 
             for sell_ord in orders['sell']:
                 self.execute_order_fn(symbol, "SELL", sell_ord['qty'], sell_ord['price'], ord_dvsn=loc_code)
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
                 
             # T값 및 회차 업데이트
             status['current_round'] = status.get('current_round', 0) + 1
