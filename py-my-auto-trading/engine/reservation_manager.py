@@ -60,6 +60,12 @@ class ReservationManager:
             
         return True
 
+    def _is_kis_business_day(self, now: datetime) -> bool:
+        """오늘이 한국 주식시장 개장일(평일)인지 확인"""
+        if now.weekday() >= 5: # 5: 토, 6: 일
+            return False
+        return True
+
     async def _reset_weekend_failed_orders(self):
         """주말/휴장 시간에 '장운영일자' 또는 '장개시 전' 오류로 실패한 주문을 다시 '대기중'으로 복구하여 영업일에 자동 접수되도록 처리"""
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
@@ -95,47 +101,74 @@ class ReservationManager:
                 else:
                     await self._reset_weekend_failed_orders()
                 
-                # 2. 08시 20분 정각 체크 (08:20:00.050 정밀 트리거, 당일 1회 한정) - 장전시간외 종가 대기열 일괄 접수
-                if now.hour == 8 and now.minute == 20 and now.second <= 5:
+                # 2. 08시 20분 정각 체크 (08:20:00.000 정밀 트리거, 당일 1회 한정) - 장전시간외 종가 대기열 병렬 선점
+                if now.hour == 8 and ((now.minute == 19 and now.second >= 50) or (now.minute == 20 and now.second <= 5)):
                     if self._last_1600_date != today_str:
                         self._last_1600_date = today_str
-                        # 증권사 서버 오픈(08:20:00.000) 전에 도착하여 '장운영시간이 아닙니다' 에러로 튕기는 것을 방지하기 위해 50ms(0.05초) 대기 후 정밀 발사
-                        if now.second == 0 and now.microsecond < 50000:
-                            await asyncio.sleep((50000 - now.microsecond) / 1000000.0)
-                        logger.info(f"[{today_str} 08:20:00.050] 장전시간외 종가 대기열 선점 스케줄러 정밀 트리거!")
-                        await self.execute_reservations_0820()
+                        
+                        if self._is_kis_business_day(now):
+                            # 1. 08:20:00 정각에 쏘기 위해 미리 파이어베이스 데이터를 읽어옴 (네트워크 블로킹 타임 사전 해소)
+                            dispatch_list = await self.prepare_0820_dispatch_data()
+                            
+                            # 데이터를 가져온 후의 현재 시간 재계산
+                            now = datetime.now(KST)
+                            if now.minute == 19:
+                                # 08:20:00.000 정각까지 남은 시간을 계산하여 대기
+                                target_time = now.replace(minute=20, second=0, microsecond=0)
+                                diff = (target_time - now).total_seconds()
+                                if diff > 0:
+                                    await asyncio.sleep(diff)
+                                
+                                # KIS 메인 서버/거래소 시계가 미세하게 느려 '장운영시간이 아닙니다'로 내부 자동 거부되는 것을 방지하기 위해 20ms(0.02초) 추가 대기
+                                await asyncio.sleep(0.02)
+                                    
+                            logger.info(f"[{today_str} 08:20:00.020] 장전시간외 종가 대기열 병렬 선점 스케줄러 정밀 트리거 (+20ms)!")
+                            asyncio.create_task(self.execute_reservations_0820(dispatch_list))
+                        else:
+                            logger.info(f"[{today_str} 08:20] 휴일(주말)이므로 장전시간외 스케줄러를 패스합니다.")
                 
                 # 3. 08시 00분 정각 체크 (08:00:00 ~ 08:00:05 사이 실행, 당일 1회 한정)
                 if now.hour == 8 and now.minute == 0 and now.second <= 5:
                     if self._last_0800_date != today_str:
                         self._last_0800_date = today_str
-                        logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
-                        await self.evaluate_and_cancel_0800(today_str)
+                        if self._is_kis_business_day(now):
+                            logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
+                            await self.evaluate_and_cancel_0800(today_str)
+                        else:
+                            logger.info(f"[{today_str} 08:00] 휴일(주말)이므로 08시 자동 판단을 패스합니다.")
 
                 # 3-1. 05시 00분 정각 체크 (05:00:00 ~ 05:00:05 사이 실행, 당일 1회 한정)
                 if now.hour == 5 and now.minute == 0 and now.second <= 5:
                     if self._last_0500_date != today_str:
                         self._last_0500_date = today_str
-                        logger.info(f"[{today_str} 05:00:00] 미국 증시 정규장 마감 스냅샷 스케줄러 트리거!")
-                        await self.snapshot_us_market_close_0500(today_str)
+                        if now.weekday() in [1, 2, 3, 4, 5]: # 화~토 (미국 월~금 정규장 마감)
+                            logger.info(f"[{today_str} 05:00:00] 미국 증시 정규장 마감 스냅샷 스케줄러 트리거!")
+                            await self.snapshot_us_market_close_0500(today_str)
+                        else:
+                            logger.info(f"[{today_str} 05:00] 휴일(일, 월)이므로 스냅샷 생성을 패스합니다.")
                         
                 # 3-2. 15시 30분 정각 체크 (15:30:00 ~ 15:30:05 사이 실행, 당일 1회 한정)
                 if now.hour == 15 and now.minute == 30 and now.second <= 5:
                     if self._last_1530_date != today_str:
                         self._last_1530_date = today_str
-                        logger.info(f"[{today_str} 15:30:00] 미국 주식 데이마켓 스냅샷 스케줄러 트리거!")
-                        await self.snapshot_us_day_market_1530(today_str)
+                        if self._is_kis_business_day(now): # 월~금 (한국 주간장 마감 시점)
+                            logger.info(f"[{today_str} 15:30:00] 미국 주식 데이마켓 스냅샷 스케줄러 트리거!")
+                            await self.snapshot_us_day_market_1530(today_str)
+                        else:
+                            logger.info(f"[{today_str} 15:30] 휴일(주말)이므로 데이마켓 스냅샷 생성을 패스합니다.")
 
                 # 4. 08시 30분 ~ 08시 39분: 10초 주기 장전시간외 종가매수 실시간 체결 알림 검사
                 if now.hour == 8 and 30 <= now.minute < 40 and now.second % 10 == 0:
-                    await self.check_0830_0840_fill_status()
+                    if self._is_kis_business_day(now):
+                        await self.check_0830_0840_fill_status()
 
                 # 5. 08시 40분 정각 체크 (08:40:00 ~ 08:40:05 사이 실행, 당일 1회 한정) - 미체결 마감 알림
                 if now.hour == 8 and now.minute == 40 and now.second <= 5:
                     if self._last_0840_date != today_str:
                         self._last_0840_date = today_str
-                        logger.info(f"[{today_str} 08:40:00] 장전시간외 종가 미체결 마감 스케줄러 트리거!")
-                        await self.check_0840_unfilled_status()
+                        if self._is_kis_business_day(now):
+                            logger.info(f"[{today_str} 08:40:00] 장전시간외 종가 미체결 마감 스케줄러 트리거!")
+                            await self.check_0840_unfilled_status()
 
                 
             except Exception as e:
@@ -230,8 +263,7 @@ class ReservationManager:
                         
                     now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     if success:
-                        if status == "대기중":
-                            self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
+                        self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
                         if odno:
                             self.fb.set_data(f"{path}/{order_id}/order_no", odno)
                         self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
@@ -345,11 +377,16 @@ class ReservationManager:
             self.fb.set_data(f"system/us_snapshot/{today_str}_base_price", final_snapshot)
             logger.info(f"[15:30 Snapshot] Saved base prices to Firebase (Fallback applied).")
 
-    async def execute_reservations_0820(self):
-        """매일 아침 08:20:00.050에 등록된 장전시간외종가 예약매수 증권사 대기열 발사 (ORD_DVSN: 05)"""
+    async def prepare_0820_dispatch_data(self) -> List[tuple]:
+        """08:20:00 정각에 즉시 발사하기 위해 미리 파이어베이스에서 주문 데이터를 가져와 파라미터 구성"""
+        dispatch_list = []
         for session_key, session in getattr(self.user_manager, "sessions", {}).items():
             if not self._is_valid_kis_domestic_session(session):
                 continue
+                
+            # API 발사 직전에 지연이 발생하지 않도록 인증 토큰을 미리 갱신 및 캐싱
+            if session.broker:
+                await session.broker.ensure_valid_token()
                 
             path = f"{session.account_path}/reservation_orders"
             orders = self.fb.get_data(path)
@@ -368,43 +405,74 @@ class ReservationManager:
                     qty = float(order.get("quantity", 0))
                     if not symbol or qty <= 0: continue
                     
-                    logger.info(f"[{session.uid}] 08:20 장전시간외 대기열 선점 매수 발사: {symbol} {qty}주 (ORD_DVSN: 05)")
+                    logger.info(f"[{session.uid}] 08:20 장전시간외 대기열 선점 매수 발사 준비 (데이터 사전로드): {symbol} {qty}주 (ORD_DVSN: 05)")
                     if not session.broker:
                         continue
-                        
-                    success, msg = await session.broker.execute_order(
-                        symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="05"
-                    )
                     
-                    odno = ""
-                    if "|" in msg:
-                        msg_parts = msg.split("|")
-                        odno = msg_parts[1].strip()
-                        msg_text = msg_parts[0].strip()
-                    else:
-                        msg_text = msg
-                        
-                    now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
-                    if success:
-                        self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
-                        if odno:
-                            self.fb.set_data(f"{path}/{order_id}/order_no", odno)
-                        self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
-                        logger.info(f"[{session.uid}] 장전시간외 대기열 전송성공! (ODNO: {odno})")
+                    # 중복 전송 방지를 위해 실제 전송 전 상태를 미리 업데이트
+                    self.fb.set_data(f"{path}/{order_id}/status", "08:20 전송중")
+                    dispatch_list.append((session, path, order_id, symbol, qty))
+                    
+        return dispatch_list
+
+    async def execute_reservations_0820(self, dispatch_list: List[tuple]):
+        """미리 준비된 dispatch_list를 받아 증권사 대기열 병렬 발사 (ORD_DVSN: 05)"""
+        tasks = []
+        now_ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
+
+        async def _dispatch_single_order(session, path, order_id, symbol, qty):
+            success, msg, odno = False, "", ""
+            # 08:20:00 정각에 너무 일찍 도착해 "장운영시간이 아닙니다" 에러 시 0.1초 뒤 1회 재시도
+            for attempt in range(2):
+                success, msg = await session.broker.execute_order(
+                    symbol=symbol, side="BUY", qty=qty, price=0.0, ord_dvsn="05"
+                )
+                if "|" in msg:
+                    msg_parts = msg.split("|")
+                    odno = msg_parts[1].strip()
+                    msg_text = msg_parts[0].strip()
+                else:
+                    msg_text = msg
+
+                if not success and ("시간" in msg_text or "운영" in msg_text):
+                    if attempt == 0:
+                        logger.warning(f"[{session.uid}] {symbol} 장운영시간 에러 반환. 0.1초 후 재시도...")
                         self.fb.send_push_notification(
                             session.uid,
-                            "🚀 08:20 장전시간외 대기열 선점 완료",
-                            f"[{symbol}] {qty}주 한국투자증권 대기열 접수 성공! (주문번호: {odno})"
+                            "🔄 장전시간외 0.1초 자동 재시도 발동",
+                            f"[{symbol}] 정각 타격 성공했으나 장운영시간 에러 발생. 0.1초 대기 후 즉시 재전송합니다."
                         )
-                    else:
-                        self.fb.set_data(f"{path}/{order_id}/status", f"전송실패({msg_text})")
-                        self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
-                        logger.warning(f"[{session.uid}] 장전시간외 대기열 전송실패: {msg_text}")
-                        self.fb.send_push_notification(
-                            session.uid,
-                            "⚠️ 08:20 장전시간외 대기열 매수 발송 실패",
-                            f"[{symbol}] {qty}주 장전시간외 대기열 발송 실패: {msg_text}"
-                        )
+                        await asyncio.sleep(0.1)
+                        continue
+                break
+
+            if success:
+                self.fb.set_data(f"{path}/{order_id}/status", "08:20 접수완료")
+                if odno:
+                    self.fb.set_data(f"{path}/{order_id}/order_no", odno)
+                self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                logger.info(f"[{session.uid}] 장전시간외 대기열 전송성공! (ODNO: {odno})")
+                self.fb.send_push_notification(
+                    session.uid,
+                    "🚀 08:20 장전시간외 대기열 선점 완료",
+                    f"[{symbol}] {qty}주 한국투자증권 대기열 접수 성공! (주문번호: {odno})"
+                )
+            else:
+                self.fb.set_data(f"{path}/{order_id}/status", f"전송실패({msg_text})")
+                self.fb.set_data(f"{path}/{order_id}/last_updated", now_ts)
+                logger.warning(f"[{session.uid}] 장전시간외 대기열 전송실패: {msg_text}")
+                self.fb.send_push_notification(
+                    session.uid,
+                    "⚠️ 08:20 장전시간외 대기열 매수 발송 실패",
+                    f"[{symbol}] {qty}주 장전시간외 대기열 발송 실패: {msg_text}"
+                )
+
+        for session, path, order_id, symbol, qty in dispatch_list:
+            tasks.append(_dispatch_single_order(session, path, order_id, symbol, qty))
+
+        if tasks:
+            logger.info(f"🚀 장전시간외 예약매수 총 {len(tasks)}건 동시 병렬 발사(Parallel Dispatch) 시작!")
+            await asyncio.gather(*tasks)
 
     async def evaluate_and_cancel_0800(self, today_str: str = None):
         """매일 08:00:00에 미국 증시 자동판단 ON인 주문들 평균 시세 검증 및 자동 취소"""
