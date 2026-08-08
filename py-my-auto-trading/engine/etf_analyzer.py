@@ -127,13 +127,14 @@ def _fetch_stock_rate_sync(symbol: str, base_price: Optional[float] = None) -> D
     
     return {"symbol": symbol, "price": 0.0, "prev_close": 0.0, "rate": 0.0, "success": False}
 
+_executor = ThreadPoolExecutor(max_workers=5)
+
 async def fetch_stock_rate(symbol: str, base_price: Optional[float] = None) -> Dict:
     """
     동기 HTTP 호출을 스레드 풀에서 비동기로 실행합니다.
     """
     loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        return await loop.run_in_executor(pool, _fetch_stock_rate_sync, symbol, base_price)
+    return await loop.run_in_executor(_executor, _fetch_stock_rate_sync, symbol, base_price)
 
 async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Optional[List[str]] = None, base_prices: Optional[Dict[str, float]] = None, constituents_map: Optional[Dict[str, List[str]]] = None) -> Tuple[float, List[Dict]]:
     """
@@ -157,13 +158,3 @@ async def analyze_etf_overnight_return(symbol_or_name: str, custom_tickers: Opti
     
     return avg_rate, results
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    async def test():
-        avg, details = await analyze_etf_overnight_return("0183J0")
-        print(f"=== TIGER 미국우주테크(0183J0) 상위 구성종목 분석 결과 ===")
-        print(f"최종 산술평균 등락률: {avg:.2f}%\n")
-        for d in details:
-            status = "성공" if d['success'] else "실패"
-            print(f"  [{status}] {d['symbol']:<5} | 등락률: {d['rate']:>6.2f}% | 현재가: ${d['price']:>7.2f} (전일: ${d['prev_close']:>7.2f})")
-    asyncio.run(test())

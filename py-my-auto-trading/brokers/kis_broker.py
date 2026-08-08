@@ -23,23 +23,28 @@ class KISBroker(BaseBroker):
         self._on_message_callback = None
         self._running_ws = False
         self._valid_tr_keys = []
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     async def ensure_valid_token(self) -> bool:
         now = time.time()
         if self.access_token and (self.token_expires_at - now > 3600):
             return True
-        token_file = f".kis_token_{self.app_key[:10] if self.app_key else 'default'}.json"
-        try:
-            import os, json
-            if os.path.exists(token_file):
-                with open(token_file, 'r') as f:
-                    cache = json.load(f)
-                    if cache.get("access_token") and (cache.get("token_expires_at", 0) - now > 3600):
-                        self.access_token = cache["access_token"]
-                        self.token_expires_at = cache["token_expires_at"]
-                        return True
-        except Exception:
-            pass
+            
+        self._token_cache_filename = f".kis_token_{self.app_key[:10] if self.app_key else 'default'}.json"
+        cache = self._load_token_cache()
+        if cache and cache.get("access_token") and (cache.get("token_expires_at", 0) - now > 3600):
+            self.access_token = cache["access_token"]
+            self.token_expires_at = cache["token_expires_at"]
+            return True
 
         headers = {"content-type": "application/json"}
         body = {
@@ -49,20 +54,21 @@ class KISBroker(BaseBroker):
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/oauth2/tokenP"
-                async with session.post(url, headers=headers, json=body, timeout=10) as res:
+            session = await self._get_session()
+            url = f"{self.base_url}/oauth2/tokenP"
+            async with session.post(url, headers=headers, json=body, timeout=10) as res:
                     data = await res.json()
                     
                     if "access_token" in data:
                         self.access_token = data["access_token"]
                         expires_in = int(data.get("expires_in", 86400))
                         self.token_expires_at = now + expires_in
-                        try:
-                            with open(token_file, 'w') as f:
-                                json.dump({"access_token": self.access_token, "token_expires_at": self.token_expires_at}, f)
-                        except Exception:
-                            pass
+                        
+                        self._save_token_cache({
+                            "access_token": self.access_token,
+                            "token_expires_at": self.token_expires_at
+                        })
+                        
                         logger.info(f"KIS Token issued for account: {self.account_number}")
                         return True
                     else:
@@ -72,15 +78,8 @@ class KISBroker(BaseBroker):
             
         return False
 
-    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[List[Dict]]]:
-        if not await self.ensure_valid_token():
-            return None, None, None
-
-        if self.is_overseas:
-            tr_id = "VTTS3012R" if self.is_mock else "TTTS3012R"
-        else:
-            tr_id = "VTTC8434R" if self.is_mock else "TTTC8434R"
-
+    async def _get_overseas_balance(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[List[Dict]]]:
+        tr_id = "VTTS3012R" if self.is_mock else "TTTS3012R"
         headers = {
             "content-type": "application/json",
             "authorization": f"Bearer {self.access_token}",
@@ -88,36 +87,18 @@ class KISBroker(BaseBroker):
             "appsecret": self.app_secret,
             "tr_id": tr_id
         }
-        if self.is_overseas:
-            params = {
-                "CANO": self.account_number,
-                "ACNT_PRDT_CD": self.acnt_prdt_cd,
-                "OVRS_EXCG_CD": "NASD",
-                "TR_CRCY_CD": "USD",
-                "CTX_AREA_FK200": "",
-                "CTX_AREA_NK200": ""
-            }
-        else:
-            params = {
-                "CANO": self.account_number,
-                "ACNT_PRDT_CD": self.acnt_prdt_cd,
-                "AFHR_FLPR_YN": "N",
-                "OFL_YN": "",
-                "INQR_DVSN": "02",
-                "UNPR_DVSN": "01",
-                "FUND_STTL_ICLD_YN": "N",
-                "FNCG_AMT_AUTO_RDPT_YN": "N",
-                "PRCS_DVSN": "00",
-                "CTX_AREA_FK100": "",
-                "CTX_AREA_NK100": ""
-            }
+        params = {
+            "CANO": self.account_number,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "OVRS_EXCG_CD": "NASD",
+            "TR_CRCY_CD": "USD",
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": ""
+        }
 
         try:
             async with aiohttp.ClientSession() as session:
-                if self.is_overseas:
-                    url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-balance"
-                else:
-                    url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+                url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-balance"
                 
                 async with session.get(url, headers=headers, params=params, timeout=10) as res:
                     data = await res.json()
@@ -129,22 +110,13 @@ class KISBroker(BaseBroker):
                     if data.get("rt_cd") == "0":
                         output1 = data.get("output1") or []
                         for item in output1:
-                            if self.is_overseas:
-                                sym = item.get("ovrs_pdno", "")
-                                name = item.get("ovrs_item_name", sym)
-                                qty = float(item.get("ovrs_cblc_qty", 0))
-                                pchs_avg = float(item.get("pchs_avg_pric", 0))
-                                curr_price = float(item.get("now_pric2", 0))
-                                pfls_rt = float(item.get("evlu_pfls_rt", 0))
-                                pfls_amt = float(item.get("frcr_evlu_pfls_amt", 0))
-                            else:
-                                sym = item.get("pdno", "")
-                                name = item.get("prdt_name", sym)
-                                qty = float(item.get("hldg_qty", 0))
-                                pchs_avg = float(item.get("pchs_avg_pric", 0))
-                                curr_price = float(item.get("prpr", 0))
-                                pfls_rt = float(item.get("evlu_pfls_rt", 0))
-                                pfls_amt = float(item.get("evlu_pfls_amt", 0))
+                            sym = item.get("ovrs_pdno", "")
+                            name = item.get("ovrs_item_name", sym)
+                            qty = float(item.get("ovrs_cblc_qty", 0))
+                            pchs_avg = float(item.get("pchs_avg_pric", 0))
+                            curr_price = float(item.get("now_pric2", 0))
+                            pfls_rt = float(item.get("evlu_pfls_rt", 0))
+                            pfls_amt = float(item.get("frcr_evlu_pfls_amt", 0))
                                 
                             if not sym or qty <= 0: continue
                             
@@ -166,22 +138,14 @@ class KISBroker(BaseBroker):
                         else:
                             summary = {}
 
-                        if self.is_overseas:
-                            if "frcr_pchs_amt1" in summary:
-                                held_value = float(summary.get("frcr_pchs_amt1", 0))
-                                yield_rate = float(summary.get("tot_pftrt", 0))
-                            else:
-                                held_value = float(summary.get("tot_evlu_pamt", 0))
-                                yield_rate = float(summary.get("evlu_erng_rt1", 0))
-                            avail_cash = float(summary.get("frcr_drwg_psbl_amt_1", summary.get("frcr_use_psbl_amt", 0)))
-                            total_balance = held_value + avail_cash
+                        if "frcr_pchs_amt1" in summary:
+                            held_value = float(summary.get("frcr_pchs_amt1", 0))
+                            yield_rate = float(summary.get("tot_pftrt", 0))
                         else:
-                            total_balance = float(summary.get("tot_evlu_amt", 0))
-                            avail_cash = float(summary.get("dnca_tot_amt", 0))
-                            if avail_cash == 0:
-                                avail_cash = float(summary.get("prvs_rcdl_excc_amt", 0))
-                            if total_balance == 0:
-                                total_balance = float(summary.get("scts_evlu_amt", 0)) + avail_cash
+                            held_value = float(summary.get("tot_evlu_pamt", 0))
+                            yield_rate = float(summary.get("evlu_erng_rt1", 0))
+                        avail_cash = float(summary.get("frcr_drwg_psbl_amt_1", summary.get("frcr_use_psbl_amt", 0)))
+                        total_balance = held_value + avail_cash
                     else:
                         logger.error(f"Balance check failed: {data.get('msg1')}")
                         return None, None, None, None
@@ -190,6 +154,94 @@ class KISBroker(BaseBroker):
         except Exception as e:
             logger.error(f"Balance check error: {e}")
             return None, None, None, None
+
+    async def _get_domestic_balance(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[List[Dict]]]:
+        tr_id = "VTTC8434R" if self.is_mock else "TTTC8434R"
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.access_token}",
+            "appkey": self.app_key,
+            "appsecret": self.app_secret,
+            "tr_id": tr_id
+        }
+        params = {
+            "CANO": self.account_number,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "02",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "00",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": ""
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+                
+                async with session.get(url, headers=headers, params=params, timeout=10) as res:
+                    data = await res.json()
+                    
+                    yield_rate = 0.0
+                    holdings = []
+
+                    if data.get("rt_cd") == "0":
+                        output1 = data.get("output1") or []
+                        for item in output1:
+                            sym = item.get("pdno", "")
+                            name = item.get("prdt_name", sym)
+                            qty = float(item.get("hldg_qty", 0))
+                            pchs_avg = float(item.get("pchs_avg_pric", 0))
+                            curr_price = float(item.get("prpr", 0))
+                            pfls_rt = float(item.get("evlu_pfls_rt", 0))
+                            pfls_amt = float(item.get("evlu_pfls_amt", 0))
+                                
+                            if not sym or qty <= 0: continue
+                            
+                            holdings.append({
+                                "symbol": sym,
+                                "name": name,
+                                "quantity": qty,
+                                "purchase_avg_price": pchs_avg,
+                                "current_price": curr_price,
+                                "profit_loss_rate": pfls_rt,
+                                "profit_loss_amount": pfls_amt
+                            })
+
+                        output2 = data.get("output2")
+                        if isinstance(output2, list):
+                            summary = output2[0] if len(output2) > 0 else {}
+                        elif isinstance(output2, dict):
+                            summary = output2
+                        else:
+                            summary = {}
+
+                        total_balance = float(summary.get("tot_evlu_amt", 0))
+                        avail_cash = float(summary.get("dnca_tot_amt", 0))
+                        if avail_cash == 0:
+                            avail_cash = float(summary.get("prvs_rcdl_excc_amt", 0))
+                        if total_balance == 0:
+                            total_balance = float(summary.get("scts_evlu_amt", 0)) + avail_cash
+                    else:
+                        logger.error(f"Balance check failed: {data.get('msg1')}")
+                        return None, None, None, None
+                            
+                    return total_balance, yield_rate, avail_cash, holdings
+        except Exception as e:
+            logger.error(f"Balance check error: {e}")
+            return None, None, None, None
+
+    async def get_balance(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[List[Dict]]]:
+        if not await self.ensure_valid_token():
+            return None, None, None, None
+
+        if self.is_overseas:
+            return await self._get_overseas_balance()
+        else:
+            return await self._get_domestic_balance()
 
     async def execute_order(self, symbol: str, side: str, qty: float, price: float, allow_extended_hours: bool = False, ord_dvsn: str = None) -> Tuple[bool, str]:
         if not await self.ensure_valid_token():
@@ -217,9 +269,9 @@ class KISBroker(BaseBroker):
         last_error = "주문 실패"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                if self.is_overseas:
-                    url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
+            session = await self._get_session()
+            if self.is_overseas:
+                url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
                     
                     for dvsn in divisions:
                         body = {
@@ -316,9 +368,9 @@ class KISBroker(BaseBroker):
             "QTY_ALL_ORD_YN": "Y"
         }
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=body, timeout=10) as res:
-                    data = await res.json()
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=body, timeout=10) as res:
+                data = await res.json()
                     if data.get("rt_cd") == "0":
                         logger.info(f"Domestic Order cancel success: {order_no} ({symbol})")
                         return True, "취소 성공"
@@ -361,9 +413,9 @@ class KISBroker(BaseBroker):
             "CTX_AREA_NK100": ""
         }
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
-                async with session.get(url, headers=headers, params=params, timeout=10) as res:
+            session = await self._get_session()
+            url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+            async with session.get(url, headers=headers, params=params, timeout=10) as res:
                     data = await res.json()
                     if data.get("rt_cd") == "0":
                         output1 = data.get("output1") or []
@@ -399,9 +451,9 @@ class KISBroker(BaseBroker):
             headers["tr_id"] = "FHKST01010100"
 
         result = {}
-        async with aiohttp.ClientSession() as session:
-            for sym in symbols:
-                sym_clean = sym.strip()
+        session = await self._get_session()
+        for sym in symbols:
+            sym_clean = sym.strip()
                 if not sym_clean: continue
                 
                 if self.is_overseas:
@@ -473,9 +525,9 @@ class KISBroker(BaseBroker):
             "secretkey": self.app_secret
         }
         try:
-            async with aiohttp.ClientSession() as session:
-                url = f"{self.base_url}/oauth2/Approval"
-                async with session.post(url, headers=headers, json=body, timeout=10) as res:
+            session = await self._get_session()
+            url = f"{self.base_url}/oauth2/Approval"
+            async with session.post(url, headers=headers, json=body, timeout=10) as res:
                     data = await res.json()
                     return data.get("approval_key")
         except Exception as e:

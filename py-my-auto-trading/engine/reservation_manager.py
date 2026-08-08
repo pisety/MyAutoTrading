@@ -7,6 +7,24 @@ from engine.etf_analyzer import analyze_etf_overnight_return
 
 logger = logging.getLogger("ReservationManager")
 
+class ReservationStatus:
+    """예약주문 상태 문자열 상수 (Firebase DB와 동일한 값 유지)"""
+    PENDING = "대기중"
+    WAITING_0820 = "08:20 전송대기"
+    SENT_LEGACY = "16시 전송완료"        # 레거시 상태명 (자동 마이그레이션 대상)
+    ACCEPTED_0820 = "08:20 접수완료"
+    FILLED_AM = "08시 장전체결완료"
+    CANCELLED = "취소됨"
+    AUTO_CANCELLED = "08시 자동취소됨"
+    MAINTAINED_PREFIX = "08시 유지됨"     # startswith 비교용
+
+def _task_error_callback(task: asyncio.Task):
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Background task failed: {exc}", exc_info=exc)
+
 class ReservationManager:
     def __init__(self, fb_client: FirebaseClient, user_manager: Any):
         self.fb = fb_client
@@ -23,6 +41,7 @@ class ReservationManager:
         logger.info("ReservationManager scheduler started.")
         self._running = True
         self._task = asyncio.create_task(self._scheduler_loop())
+        self._task.add_done_callback(_task_error_callback)
 
     async def stop(self):
         logger.info("ReservationManager scheduler stopping.")
@@ -84,6 +103,81 @@ class ReservationManager:
                     logger.info(f"[{session.uid}] 주말/휴장시간 오류 주문({symbol}) ➔ '대기중'으로 복구")
                     self.fb.set_data(f"{path}/{order_id}/status", "대기중")
 
+    async def _handle_0820(self, today_str):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._last_1600_date != today_str:
+            self._last_1600_date = today_str
+            
+            if self._is_kis_business_day(now):
+                # 1. 08:20:00 정각에 쏘기 위해 미리 파이어베이스 데이터를 읽어옴 (네트워크 블로킹 타임 사전 해소)
+                dispatch_list = await self.prepare_0820_dispatch_data()
+                
+                # 데이터를 가져온 후의 현재 시간 재계산
+                now = datetime.now(KST)
+                if now.minute == 19:
+                    # 08:20:00.000 정각까지 남은 시간을 계산하여 대기
+                    target_time = now.replace(minute=20, second=0, microsecond=0)
+                    diff = (target_time - now).total_seconds()
+                    if diff > 0:
+                        await asyncio.sleep(diff)
+                    
+                    # KIS 메인 서버/거래소 시계가 미세하게 느려 '장운영시간이 아닙니다'로 내부 자동 거부되는 것을 방지하기 위해 20ms(0.02초) 추가 대기
+                    await asyncio.sleep(0.02)
+                        
+                logger.info(f"[{today_str} 08:20:00.020] 장전시간외 종가 대기열 병렬 선점 스케줄러 정밀 트리거 (+20ms)!")
+                asyncio.create_task(self.execute_reservations_0820(dispatch_list)).add_done_callback(_task_error_callback)
+            else:
+                logger.info(f"[{today_str} 08:20] 휴일(주말)이므로 장전시간외 스케줄러를 패스합니다.")
+
+    async def _handle_0800(self, today_str):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._last_0800_date != today_str:
+            self._last_0800_date = today_str
+            if self._is_kis_business_day(now):
+                logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
+                await self.evaluate_and_cancel_0800(today_str)
+            else:
+                logger.info(f"[{today_str} 08:00] 휴일(주말)이므로 08시 자동 판단을 패스합니다.")
+
+    async def _handle_0500(self, today_str):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._last_0500_date != today_str:
+            self._last_0500_date = today_str
+            if now.weekday() in [1, 2, 3, 4, 5]: # 화~토 (미국 월~금 정규장 마감)
+                logger.info(f"[{today_str} 05:00:00] 미국 증시 정규장 마감 스냅샷 스케줄러 트리거!")
+                await self.snapshot_us_market_close_0500(today_str)
+            else:
+                logger.info(f"[{today_str} 05:00] 휴일(일, 월)이므로 스냅샷 생성을 패스합니다.")
+
+    async def _handle_1530(self, today_str):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._last_1530_date != today_str:
+            self._last_1530_date = today_str
+            if self._is_kis_business_day(now): # 월~금 (한국 주간장 마감 시점)
+                logger.info(f"[{today_str} 15:30:00] 미국 주식 데이마켓 스냅샷 스케줄러 트리거!")
+                await self.snapshot_us_day_market_1530(today_str)
+            else:
+                logger.info(f"[{today_str} 15:30] 휴일(주말)이므로 데이마켓 스냅샷 생성을 패스합니다.")
+
+    async def _handle_0830_0840_fills(self):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._is_kis_business_day(now):
+            await self.check_0830_0840_fill_status()
+
+    async def _handle_0840_unfilled(self, today_str):
+        KST = timezone(timedelta(hours=9))
+        now = datetime.now(KST)
+        if self._last_0840_date != today_str:
+            self._last_0840_date = today_str
+            if self._is_kis_business_day(now):
+                logger.info(f"[{today_str} 08:40:00] 장전시간외 종가 미체결 마감 스케줄러 트리거!")
+                await self.check_0840_unfilled_status()
+
     async def _scheduler_loop(self):
         KST = timezone(timedelta(hours=9))
         while self._running:
@@ -103,72 +197,27 @@ class ReservationManager:
                 
                 # 2. 08시 20분 정각 체크 (08:20:00.000 정밀 트리거, 당일 1회 한정) - 장전시간외 종가 대기열 병렬 선점
                 if now.hour == 8 and ((now.minute == 19 and now.second >= 50) or (now.minute == 20 and now.second <= 5)):
-                    if self._last_1600_date != today_str:
-                        self._last_1600_date = today_str
-                        
-                        if self._is_kis_business_day(now):
-                            # 1. 08:20:00 정각에 쏘기 위해 미리 파이어베이스 데이터를 읽어옴 (네트워크 블로킹 타임 사전 해소)
-                            dispatch_list = await self.prepare_0820_dispatch_data()
-                            
-                            # 데이터를 가져온 후의 현재 시간 재계산
-                            now = datetime.now(KST)
-                            if now.minute == 19:
-                                # 08:20:00.000 정각까지 남은 시간을 계산하여 대기
-                                target_time = now.replace(minute=20, second=0, microsecond=0)
-                                diff = (target_time - now).total_seconds()
-                                if diff > 0:
-                                    await asyncio.sleep(diff)
-                                
-                                # KIS 메인 서버/거래소 시계가 미세하게 느려 '장운영시간이 아닙니다'로 내부 자동 거부되는 것을 방지하기 위해 20ms(0.02초) 추가 대기
-                                await asyncio.sleep(0.02)
-                                    
-                            logger.info(f"[{today_str} 08:20:00.020] 장전시간외 종가 대기열 병렬 선점 스케줄러 정밀 트리거 (+20ms)!")
-                            asyncio.create_task(self.execute_reservations_0820(dispatch_list))
-                        else:
-                            logger.info(f"[{today_str} 08:20] 휴일(주말)이므로 장전시간외 스케줄러를 패스합니다.")
+                    await self._handle_0820(today_str)
                 
                 # 3. 08시 00분 정각 체크 (08:00:00 ~ 08:00:05 사이 실행, 당일 1회 한정)
                 if now.hour == 8 and now.minute == 0 and now.second <= 5:
-                    if self._last_0800_date != today_str:
-                        self._last_0800_date = today_str
-                        if self._is_kis_business_day(now):
-                            logger.info(f"[{today_str} 08:00:00] 미국 증시 자동 판단 및 취소 스케줄러 트리거!")
-                            await self.evaluate_and_cancel_0800(today_str)
-                        else:
-                            logger.info(f"[{today_str} 08:00] 휴일(주말)이므로 08시 자동 판단을 패스합니다.")
+                    await self._handle_0800(today_str)
 
                 # 3-1. 05시 00분 정각 체크 (05:00:00 ~ 05:00:05 사이 실행, 당일 1회 한정)
                 if now.hour == 5 and now.minute == 0 and now.second <= 5:
-                    if self._last_0500_date != today_str:
-                        self._last_0500_date = today_str
-                        if now.weekday() in [1, 2, 3, 4, 5]: # 화~토 (미국 월~금 정규장 마감)
-                            logger.info(f"[{today_str} 05:00:00] 미국 증시 정규장 마감 스냅샷 스케줄러 트리거!")
-                            await self.snapshot_us_market_close_0500(today_str)
-                        else:
-                            logger.info(f"[{today_str} 05:00] 휴일(일, 월)이므로 스냅샷 생성을 패스합니다.")
+                    await self._handle_0500(today_str)
                         
                 # 3-2. 15시 30분 정각 체크 (15:30:00 ~ 15:30:05 사이 실행, 당일 1회 한정)
                 if now.hour == 15 and now.minute == 30 and now.second <= 5:
-                    if self._last_1530_date != today_str:
-                        self._last_1530_date = today_str
-                        if self._is_kis_business_day(now): # 월~금 (한국 주간장 마감 시점)
-                            logger.info(f"[{today_str} 15:30:00] 미국 주식 데이마켓 스냅샷 스케줄러 트리거!")
-                            await self.snapshot_us_day_market_1530(today_str)
-                        else:
-                            logger.info(f"[{today_str} 15:30] 휴일(주말)이므로 데이마켓 스냅샷 생성을 패스합니다.")
+                    await self._handle_1530(today_str)
 
                 # 4. 08시 30분 ~ 08시 39분: 10초 주기 장전시간외 종가매수 실시간 체결 알림 검사
                 if now.hour == 8 and 30 <= now.minute < 40 and now.second % 10 == 0:
-                    if self._is_kis_business_day(now):
-                        await self.check_0830_0840_fill_status()
+                    await self._handle_0830_0840_fills()
 
                 # 5. 08시 40분 정각 체크 (08:40:00 ~ 08:40:05 사이 실행, 당일 1회 한정) - 미체결 마감 알림
                 if now.hour == 8 and now.minute == 40 and now.second <= 5:
-                    if self._last_0840_date != today_str:
-                        self._last_0840_date = today_str
-                        if self._is_kis_business_day(now):
-                            logger.info(f"[{today_str} 08:40:00] 장전시간외 종가 미체결 마감 스케줄러 트리거!")
-                            await self.check_0840_unfilled_status()
+                    await self._handle_0840_unfilled(today_str)
 
                 
             except Exception as e:
