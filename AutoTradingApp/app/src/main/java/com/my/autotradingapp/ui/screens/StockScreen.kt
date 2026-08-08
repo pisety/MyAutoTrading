@@ -352,7 +352,10 @@ fun StockScreen(
                                     }
                                     Button(
                                         onClick = { showReservationDialog = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.tertiary,
+                                            contentColor = MaterialTheme.colorScheme.onTertiary
+                                        ),
                                         modifier = Modifier.fillMaxWidth().height(48.dp)
                                     ) {
                                         Text("🚀 장전시간외 매수 주문예약 설정", fontWeight = FontWeight.Bold)
