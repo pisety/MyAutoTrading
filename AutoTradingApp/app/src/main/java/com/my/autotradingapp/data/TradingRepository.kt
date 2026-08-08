@@ -163,7 +163,7 @@ class TradingRepository {
         
         stockAccountListener = database.getReference("$stockPath/account_data").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val newActiveId = snapshot.child("activeAccountId").value as? String ?: ""
+                val newActiveId = snapshot.child("active_account_id").value as? String ?: ""
                 val changed = stockActiveAccountId != newActiveId
                 
                 _stockAccountData.value = parseAccountData(snapshot, stockPath)
@@ -180,7 +180,7 @@ class TradingRepository {
 
         cryptoAccountListener = database.getReference("$cryptoPath/account_data").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val newActiveId = snapshot.child("activeAccountId").value as? String ?: ""
+                val newActiveId = snapshot.child("active_account_id").value as? String ?: ""
                 val changed = cryptoActiveAccountId != newActiveId
                 
                 _cryptoAccountData.value = parseAccountData(snapshot, cryptoPath)
@@ -342,19 +342,19 @@ class TradingRepository {
                 Log.w("TradingApp", "Account data does not exist at $path")
                 return UserAccountData()
             }
-            val activeAccountId = snapshot.child("activeAccountId").value as? String ?: ""
+            val activeAccountId = snapshot.child("active_account_id").value as? String ?: ""
             val pinCode = snapshot.child("pin").value as? String ?: ""
             
             val savedAccounts = mutableMapOf<String, AccountInfo>()
-            snapshot.child("savedAccounts").children.forEach { child ->
+            snapshot.child("saved_accounts").children.forEach { child ->
                 val key = child.key ?: return@forEach
                 val broker = child.child("broker").value as? String ?: ""
-                val isMock = (child.child("_mock").value ?: child.child("isMock").value) as? Boolean ?: true
-                val isOverseas = (child.child("_overseas").value ?: child.child("isOverseas").value) as? Boolean ?: true
-                val accNum = child.child("accountNumber").value as? String ?: ""
-                val rawAppKey = child.child("appKey").value as? String ?: ""
+                val isMock = (child.child("_mock").value ?: child.child("is_mock").value) as? Boolean ?: true
+                val isOverseas = (child.child("_overseas").value ?: child.child("is_overseas").value) as? Boolean ?: true
+                val accNum = child.child("account_number").value as? String ?: ""
+                val rawAppKey = child.child("app_key").value as? String ?: ""
                 val appKey = CryptoUtils.decrypt(rawAppKey)
-                val rawAppSecret = child.child("appSecret").value as? String ?: ""
+                val rawAppSecret = child.child("app_secret").value as? String ?: ""
                 val appSecret = CryptoUtils.decrypt(rawAppSecret)
                 val lastUsed = child.child("last_used_timestamp").value as? String ?: ""
                 
@@ -374,27 +374,27 @@ class TradingRepository {
             if (!snapshot.exists()) {
                 return TradingStatus()
             }
-            val totalBalance = (snapshot.child("totalBalance").value as? Number)?.toDouble() ?: 0.0
-            val currentYield = (snapshot.child("currentYield").value as? Number)?.toFloat() ?: 0.0f
-            val availCash = (snapshot.child("availCash").value as? Number)?.toDouble() ?: 0.0
-            val lastUpdated = snapshot.child("lastUpdated").value as? String ?: ""
+            val totalBalance = (snapshot.child("total_balance").value as? Number)?.toDouble() ?: 0.0
+            val currentYield = (snapshot.child("current_yield").value as? Number)?.toFloat() ?: 0.0f
+            val availCash = (snapshot.child("avail_cash").value as? Number)?.toDouble() ?: 0.0
+            val lastUpdated = snapshot.child("last_updated").value as? String ?: ""
             
             val stockPrices = mutableMapOf<String, Double>()
-            snapshot.child("stockPrices").children.forEach { child ->
+            snapshot.child("stock_prices").children.forEach { child ->
                 val key = child.key ?: return@forEach
                 val value = (child.value as? Number)?.toDouble() ?: 0.0
                 stockPrices[key] = value
             }
 
             val stockPricesChange = mutableMapOf<String, Double>()
-            snapshot.child("stockPricesChange").children.forEach { child ->
+            snapshot.child("stock_prices_change").children.forEach { child ->
                 val key = child.key ?: return@forEach
                 val value = (child.value as? Number)?.toDouble() ?: 0.0
                 stockPricesChange[key] = value
             }
 
             val stockNames = mutableMapOf<String, String>()
-            snapshot.child("stockNames").children.forEach { child ->
+            snapshot.child("stock_names").children.forEach { child ->
                 val key = child.key ?: return@forEach
                 val value = child.value as? String ?: ""
                 // Filter out corrupted keys inserted by old versions (e.g. KRW-KRW-BTC or Korean characters)
@@ -410,7 +410,7 @@ class TradingRepository {
                 val symbol = child.child("symbol").value as? String ?: return@forEach
                 val qty = (child.child("quantity").value as? Number)?.toDouble() ?: 0.0
                 val avgPrice = (child.child("purchase_avg_price").value as? Number)?.toDouble() ?: 0.0
-                val curPrice = (child.child("currentPrice").value as? Number)?.toDouble() ?: 0.0
+                val curPrice = (child.child("current_price").value as? Number)?.toDouble() ?: 0.0
                 val plAmount = (child.child("profit_loss_amount").value as? Number)?.toDouble() ?: 0.0
                 val yieldRate = (child.child("profit_loss_rate").value as? Number)?.toFloat() ?: 0.0f
                 val name = child.child("name").value as? String ?: ""
@@ -433,9 +433,9 @@ class TradingRepository {
             val key = child.key ?: continue
             result[key] = LaoreSettings(
                 enabled = child.child("enabled").value as? Boolean ?: false,
-                totalBudget = (child.child("totalBudget").value as? Number)?.toDouble() ?: 0.0,
-                splitCount = (child.child("splitCount").value as? Number)?.toInt() ?: 40,
-                targetYieldPercent = (child.child("targetYieldPercent").value as? Number)?.toFloat() ?: 10.0f
+                totalBudget = (child.child("total_budget").value as? Number)?.toDouble() ?: 0.0,
+                splitCount = (child.child("split_count").value as? Number)?.toInt() ?: 40,
+                targetYieldPercent = (child.child("target_yield_percent").value as? Number)?.toFloat() ?: 10.0f
             )
         }
         return result
@@ -447,14 +447,14 @@ class TradingRepository {
         for (child in snapshot.children) {
             val key = child.key ?: continue
             result[key] = LaoreStatus(
-                currentRound = (child.child("currentRound").value as? Number)?.toInt() ?: 0,
-                holdingQuantity = (child.child("holdingQuantity").value as? Number)?.toDouble() ?: 0.0,
-                averagePrice = (child.child("averagePrice").value as? Number)?.toDouble() ?: 0.0,
-                statusMessage = child.child("statusMessage").value as? String ?: "",
-                currentMode = child.child("currentMode").value as? String ?: "일반 모드(전반전)",
-                tValue = (child.child("tValue").value as? Number)?.toDouble() ?: 0.0,
-                targetSellPrice = (child.child("targetSellPrice").value as? Number)?.toDouble() ?: 0.0,
-                remainingCash = (child.child("remainingCash").value as? Number)?.toDouble() ?: 0.0
+                currentRound = (child.child("current_round").value as? Number)?.toInt() ?: 0,
+                holdingQuantity = (child.child("holding_quantity").value as? Number)?.toDouble() ?: 0.0,
+                averagePrice = (child.child("average_price").value as? Number)?.toDouble() ?: 0.0,
+                statusMessage = child.child("status_message").value as? String ?: "",
+                currentMode = child.child("current_mode").value as? String ?: "일반 모드(전반전)",
+                tValue = (child.child("t_value").value as? Number)?.toDouble() ?: 0.0,
+                targetSellPrice = (child.child("target_sell_price").value as? Number)?.toDouble() ?: 0.0,
+                remainingCash = (child.child("remaining_cash").value as? Number)?.toDouble() ?: 0.0
             )
         }
         return result
@@ -488,11 +488,11 @@ class TradingRepository {
         if (!snapshot.exists()) {
             return TradingSettings()
         }
-        val isAutoTrading = snapshot.child("isAutoTrading").value as? Boolean ?: false
+        val isAutoTrading = snapshot.child("is_auto_trading").value as? Boolean ?: false
         val memo = snapshot.child("memo").value as? String ?: ""
         
         val watchSymbolsRaw = mutableMapOf<String, SymbolSettings>()
-        snapshot.child("watchSymbols").children.forEach { child ->
+        snapshot.child("watch_symbols").children.forEach { child ->
             val key = child.key ?: return@forEach
             val enabled = child.child("enabled").value as? Boolean ?: true
             val order = (child.child("order").value as? Long)?.toInt() ?: 0
@@ -500,33 +500,33 @@ class TradingRepository {
         }
         val watchSymbols = watchSymbolsRaw.entries.sortedBy { it.value.order }.associate { it.key to it.value }
         
-        val surgeNode = snapshot.child("surgeTrading")
+        val surgeNode = snapshot.child("surge_trading")
         val surgeEnabled = surgeNode.child("enabled").value as? Boolean ?: false
         
         val perSymbolConfig = mutableMapOf<String, List<SymbolSurgeConfig>>()
-        surgeNode.child("perSymbolConfig").children.forEach { child ->
+        surgeNode.child("per_symbol_config").children.forEach { child ->
             val key = child.key ?: return@forEach
             val list = mutableListOf<SymbolSurgeConfig>()
             
             // Check if this child has numbered children (array) or is a single object
             if (child.hasChildren() && child.children.firstOrNull()?.key?.toIntOrNull() != null) {
                 child.children.forEach { cfgChild ->
-                    val timeWindow = (cfgChild.child("timeWindowSeconds").value as? Number)?.toInt() ?: 60
-                    val threshold = (cfgChild.child("surgePercentThreshold").value as? Number)?.toFloat() ?: 3.0f
-                    val qty = (cfgChild.child("buyQuantity").value as? Number)?.toDouble() ?: 0.0
+                    val timeWindow = (cfgChild.child("time_window_seconds").value as? Number)?.toInt() ?: 60
+                    val threshold = (cfgChild.child("surge_percent_threshold").value as? Number)?.toFloat() ?: 3.0f
+                    val qty = (cfgChild.child("buy_quantity").value as? Number)?.toDouble() ?: 0.0
                     list.add(SymbolSurgeConfig(timeWindow, threshold, qty))
                 }
             } else {
                 // Fallback for old single-object structure
-                val timeWindow = (child.child("timeWindowSeconds").value as? Number)?.toInt() ?: 60
-                val threshold = (child.child("surgePercentThreshold").value as? Number)?.toFloat() ?: 3.0f
-                val qty = (child.child("buyQuantity").value as? Number)?.toDouble() ?: 0.0
+                val timeWindow = (child.child("time_window_seconds").value as? Number)?.toInt() ?: 60
+                val threshold = (child.child("surge_percent_threshold").value as? Number)?.toFloat() ?: 3.0f
+                val qty = (child.child("buy_quantity").value as? Number)?.toDouble() ?: 0.0
                 list.add(SymbolSurgeConfig(timeWindow, threshold, qty))
             }
             perSymbolConfig[key] = list
         }
         
-        val surgeExt = surgeNode.child("allowExtendedHours").value as? Boolean ?: true
+        val surgeExt = surgeNode.child("allow_extended_hours").value as? Boolean ?: true
         val surgeTrading = SurgeTradingConfig(surgeEnabled, surgeExt, perSymbolConfig)
         
         return TradingSettings(isAutoTrading, watchSymbols, surgeTrading, memo)
@@ -537,7 +537,7 @@ class TradingRepository {
             val status = snapshot.child("status").value as? String ?: return
             if (status == "FAILED" || status == "SUCCESS") {
                 val cmd = snapshot.child("command").value as? String ?: "NONE"
-                val err = snapshot.child("errorMessage").value as? String ?: ""
+                val err = snapshot.child("error_message").value as? String ?: ""
                 val order = ManualOrder(cmd, "", 0.0, 0.0, "", status, err)
                 _manualOrderStatus.value = order
             }
@@ -622,19 +622,19 @@ class TradingRepository {
             
             val accountMap = mutableMapOf<String, Any>(
                 "broker" to info.broker,
-                "isMock" to info.isMock,
-                "isOverseas" to info.isOverseas,
-                "appKey" to CryptoUtils.encrypt(info.appKey),
-                "appSecret" to CryptoUtils.encrypt(info.appSecret),
+                "is_mock" to info.isMock,
+                "is_overseas" to info.isOverseas,
+                "app_key" to CryptoUtils.encrypt(info.appKey),
+                "app_secret" to CryptoUtils.encrypt(info.appSecret),
                 "last_used_timestamp" to timestamp
             )
             if (serviceType != "crypto") {
                 accountMap["accountNumber"] = info.accountNumber
             }
             
-            accRef.child("savedAccounts").child(key).setValue(accountMap)
+            accRef.child("saved_accounts").child(key).setValue(accountMap)
                 .addOnSuccessListener { 
-                    accRef.child("activeAccountId").setValue(key)
+                    accRef.child("active_account_id").setValue(key)
                     if (newPinToSet.isNotEmpty()) {
                         accRef.child("pin").setValue(CryptoUtils.encrypt(newPinToSet))
                     }
@@ -747,10 +747,10 @@ class TradingRepository {
         
         val accountMap = mutableMapOf<String, Any>(
             "broker" to info.broker,
-            "isMock" to info.isMock,
-            "isOverseas" to info.isOverseas,
-            "appKey" to CryptoUtils.encrypt(info.appKey),
-            "appSecret" to CryptoUtils.encrypt(info.appSecret),
+            "is_mock" to info.isMock,
+            "is_overseas" to info.isOverseas,
+            "app_key" to CryptoUtils.encrypt(info.appKey),
+            "app_secret" to CryptoUtils.encrypt(info.appSecret),
             "last_used_timestamp" to timestamp
         )
         if (serviceType != "crypto") {
@@ -760,11 +760,11 @@ class TradingRepository {
         Log.d("TradingApp", "Saving account to: $servicePath/account_data/savedAccounts/$key")
         
         val accRef = database.getReference("$servicePath/account_data")
-        accRef.child("savedAccounts").child(key).setValue(accountMap)
+        accRef.child("saved_accounts").child(key).setValue(accountMap)
             .addOnSuccessListener { Log.d("TradingApp", "Account saved successfully") }
             .addOnFailureListener { Log.e("TradingApp", "Failed to save account: ${it.message}") }
             
-        accRef.child("activeAccountId").setValue(key)
+        accRef.child("active_account_id").setValue(key)
         database.getReference("$servicePath/status").removeValue()
         if (serviceType == "crypto") {
             _cryptoStatus.value = TradingStatus()
@@ -775,7 +775,7 @@ class TradingRepository {
 
     fun toggleAutoTrading(enabled: Boolean, serviceType: String) {
         val servicePath = getAccountPath(_userId.value, serviceType)
-        database.getReference("$servicePath/settings/isAutoTrading").setValue(enabled)
+        database.getReference("$servicePath/settings/is_auto_trading").setValue(enabled)
     }
 
     fun updateWatchSymbols(symbols: List<String>, serviceType: String, isOverseas: Boolean? = null) {
@@ -814,7 +814,7 @@ class TradingRepository {
                 database.getReference(stockNamesPath).child(sym).setValue(name)
             }
         }
-        database.getReference("$servicePath/settings/watchSymbols").setValue(symbolsMap)
+        database.getReference("$servicePath/settings/watch_symbols").setValue(symbolsMap)
     }
 
     fun sendManualOrder(command: String, symbol: String, quantity: Double, price: Double, serviceType: String) {
@@ -845,7 +845,7 @@ class TradingRepository {
 
     fun updateSurgeTradingSettings(config: SurgeTradingConfig, serviceType: String) {
         val servicePath = getAccountPath(_userId.value, serviceType)
-        database.getReference("$servicePath/settings/surgeTrading").setValue(config)
+        database.getReference("$servicePath/settings/surge_trading").setValue(config)
     }
 
     private fun parseReservationOrders(snapshot: DataSnapshot): Map<String, ReservationOrder> {
