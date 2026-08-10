@@ -84,12 +84,12 @@ class FirebaseClient:
                 logger.warning(f"No FCM token found for user {user_id}. Cannot send push notification.")
                 return
 
-            # 2. 메시지 생성 및 전송
+            # 2. 메시지 생성 및 전송 (data 페이로드만 사용하여 백그라운드에서도 onMessageReceived 강제 호출)
             message = messaging.Message(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body
-                ),
+                data={
+                    "title": title,
+                    "body": body
+                },
                 token=token
             )
             response = messaging.send(message)

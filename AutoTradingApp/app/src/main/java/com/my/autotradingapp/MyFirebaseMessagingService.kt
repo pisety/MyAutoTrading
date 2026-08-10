@@ -59,6 +59,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
+        val notificationId = System.currentTimeMillis().toInt() + (0..10000).random()
+        notificationManager.notify(notificationId, notificationBuilder.build())
     }
 }
