@@ -371,13 +371,13 @@ class KISBroker(BaseBroker):
             session = await self._get_session()
             async with session.post(url, headers=headers, json=body, timeout=10) as res:
                 data = await res.json()
-                    if data.get("rt_cd") == "0":
-                        logger.info(f"Domestic Order cancel success: {order_no} ({symbol})")
-                        return True, "취소 성공"
-                    else:
-                        msg = data.get("msg1", "")
-                        logger.warning(f"Domestic Order cancel failed: {msg}")
-                        return False, msg
+                if data.get("rt_cd") == "0":
+                    logger.info(f"Domestic Order cancel success: {order_no} ({symbol})")
+                    return True, "취소 성공"
+                else:
+                    msg = data.get("msg1", "")
+                    logger.warning(f"Domestic Order cancel failed: {msg}")
+                    return False, msg
         except Exception as e:
             logger.error(f"Cancel exception: {e}")
             return False, f"오류: {e}"
@@ -454,66 +454,66 @@ class KISBroker(BaseBroker):
         session = await self._get_session()
         for sym in symbols:
             sym_clean = sym.strip()
-                if not sym_clean: continue
-                
-                if self.is_overseas:
-                    found = False
-                    for excd in ["NAS", "NYS", "AMS"]:
-                        params = {"AUTH": "", "EXCD": excd, "SYMB": sym_clean}
-                        try:
-                            url = f"{self.base_url}/uapi/overseas-price/v1/quotations/price"
-                            async with session.get(url, headers=headers, params=params, timeout=10) as res:
-                                data = await res.json()
-                                if data.get("rt_cd") == "0":
-                                    output = data.get("output", {})
-                                    price_str = output.get("last", "")
-                                    if price_str:
-                                        result[sym] = float(price_str)
-                                        found = True
-                                        break
-                        except Exception as e:
-                            logger.debug(f"REST fetch error {sym} on {excd}: {e}")
-                        await asyncio.sleep(0.2)
-                    
-                    if not found:
-                        logger.warning(f"Failed to fetch REST price for {sym} from KIS on all exchanges. Falling back to Yahoo Finance...")
-                        try:
-                            yf_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_clean}"
-                            yf_headers = {'User-Agent': 'Mozilla/5.0'}
-                            async with session.get(yf_url, headers=yf_headers, timeout=10) as res:
-                                if res.status == 200:
-                                    data = await res.json()
-                                    if "chart" in data and "result" in data["chart"] and data["chart"]["result"]:
-                                        meta = data["chart"]["result"][0]["meta"]
-                                        price = meta.get("regularMarketPrice")
-                                        prev_close = meta.get("previousClose")
-                                        if price:
-                                            chg = ((float(price) - float(prev_close)) / float(prev_close) * 100) if prev_close and float(prev_close) > 0 else 0.0
-                                            result[sym] = (float(price), chg)
-                                            found = True
-                                            logger.info(f"Successfully fetched price for {sym} from Yahoo Finance: {price}")
-                        except Exception as e:
-                            logger.error(f"Yahoo Finance fallback error for {sym}: {e}")
-                        
-                    if not found:
-                        logger.warning(f"Failed to fetch REST price for {sym} on all exchanges including fallback.")
-                else:
-                    params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": sym_clean}
+            if not sym_clean: continue
+            
+            if self.is_overseas:
+                found = False
+                for excd in ["NAS", "NYS", "AMS"]:
+                    params = {"AUTH": "", "EXCD": excd, "SYMB": sym_clean}
                     try:
-                        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
+                        url = f"{self.base_url}/uapi/overseas-price/v1/quotations/price"
                         async with session.get(url, headers=headers, params=params, timeout=10) as res:
                             data = await res.json()
                             if data.get("rt_cd") == "0":
                                 output = data.get("output", {})
-                                price_str = output.get("stck_prpr", "")
-                                chg_str = output.get("prdy_ctrt", "0")
+                                price_str = output.get("last", "")
                                 if price_str:
-                                    result[sym] = (float(price_str), float(chg_str))
-                            else:
-                                logger.debug(f"Domestic REST fetch miss {sym}: {data.get('msg1')}")
+                                    result[sym] = float(price_str)
+                                    found = True
+                                    break
                     except Exception as e:
-                        logger.debug(f"Domestic REST fetch error {sym}: {e}")
+                        logger.debug(f"REST fetch error {sym} on {excd}: {e}")
                     await asyncio.sleep(0.2)
+                
+                if not found:
+                    logger.warning(f"Failed to fetch REST price for {sym} from KIS on all exchanges. Falling back to Yahoo Finance...")
+                    try:
+                        yf_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_clean}"
+                        yf_headers = {'User-Agent': 'Mozilla/5.0'}
+                        async with session.get(yf_url, headers=yf_headers, timeout=10) as res:
+                            if res.status == 200:
+                                data = await res.json()
+                                if "chart" in data and "result" in data["chart"] and data["chart"]["result"]:
+                                    meta = data["chart"]["result"][0]["meta"]
+                                    price = meta.get("regularMarketPrice")
+                                    prev_close = meta.get("previousClose")
+                                    if price:
+                                        chg = ((float(price) - float(prev_close)) / float(prev_close) * 100) if prev_close and float(prev_close) > 0 else 0.0
+                                        result[sym] = (float(price), chg)
+                                        found = True
+                                        logger.info(f"Successfully fetched price for {sym} from Yahoo Finance: {price}")
+                    except Exception as e:
+                        logger.error(f"Yahoo Finance fallback error for {sym}: {e}")
+                    
+                if not found:
+                    logger.warning(f"Failed to fetch REST price for {sym} on all exchanges including fallback.")
+            else:
+                params = {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": sym_clean}
+                try:
+                    url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price"
+                    async with session.get(url, headers=headers, params=params, timeout=10) as res:
+                        data = await res.json()
+                        if data.get("rt_cd") == "0":
+                            output = data.get("output", {})
+                            price_str = output.get("stck_prpr", "")
+                            chg_str = output.get("prdy_ctrt", "0")
+                            if price_str:
+                                result[sym] = (float(price_str), float(chg_str))
+                        else:
+                            logger.debug(f"Domestic REST fetch miss {sym}: {data.get('msg1')}")
+                except Exception as e:
+                    logger.debug(f"Domestic REST fetch error {sym}: {e}")
+                await asyncio.sleep(0.2)
 
         return result
 
