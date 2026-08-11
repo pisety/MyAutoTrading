@@ -116,30 +116,30 @@ class KiwoomBroker(BaseBroker):
         try:
             session = await self._get_session()
             task_04 = session.post(url_acnt, headers=headers_04, json=body_04, timeout=10)
-                task_18 = session.post(url_acnt, headers=headers_18, json=body_18, timeout=10)
-                resp_04, resp_18 = await asyncio.gather(task_04, task_18)
+            task_18 = session.post(url_acnt, headers=headers_18, json=body_18, timeout=10)
+            resp_04, resp_18 = await asyncio.gather(task_04, task_18)
+            
+            cash_balance = 0.0
+            if resp_04.status == 200:
+                res_04 = await resp_04.json()
+                # entr: ?덉닔湲?                    cash_balance = float(res_04.get("entr", 0))
+            
+            total_yield = 0.0
+            holdings = []
+            total_evlt_amt = 0.0
+            if resp_18.status == 200:
+                res_18 = await resp_18.json()
+                # tot_prft_rt: 珥앹닔?듬쪧
+                total_yield = float(res_18.get("tot_prft_rt", 0))
+                total_evlt_amt = float(res_18.get("tot_evlt_amt", 0))
                 
-                cash_balance = 0.0
-                if resp_04.status == 200:
-                    res_04 = await resp_04.json()
-                    # entr: ?덉닔湲?                    cash_balance = float(res_04.get("entr", 0))
-                
-                total_yield = 0.0
-                holdings = []
-                total_evlt_amt = 0.0
-                if resp_18.status == 200:
-                    res_18 = await resp_18.json()
-                    # tot_prft_rt: 珥앹닔?듬쪧
-                    total_yield = float(res_18.get("tot_prft_rt", 0))
-                    total_evlt_amt = float(res_18.get("tot_evlt_amt", 0))
-                    
-                    for item in res_18.get("acnt_evlt_remn_indv_tot", []):
-                        stk_cd = item.get("stk_cd", "").replace("A", "").strip()
-                        if stk_cd:
-                            holdings.append(stk_cd)
-                
-                total_balance = total_evlt_amt if total_evlt_amt > 0 else cash_balance
-                return total_balance, total_yield, cash_balance, holdings
+                for item in res_18.get("acnt_evlt_remn_indv_tot", []):
+                    stk_cd = item.get("stk_cd", "").replace("A", "").strip()
+                    if stk_cd:
+                        holdings.append(stk_cd)
+            
+            total_balance = total_evlt_amt if total_evlt_amt > 0 else cash_balance
+            return total_balance, total_yield, cash_balance, holdings
         except Exception as e:
             logger.error(f"Kiwoom get_balance error: {e}")
             return None, None, None, None
@@ -155,20 +155,20 @@ class KiwoomBroker(BaseBroker):
         try:
             session = await self._get_session()
             async with session.post(url_acnt, headers=headers_18, json=body_18, timeout=10) as resp:
-                    if resp.status == 200:
-                        res = await resp.json()
-                        result = {}
-                        for item in res.get("acnt_evlt_remn_indv_tot", []):
-                            stk_cd = item.get("stk_cd", "").replace("A", "").strip()
-                            if stk_cd:
-                                result[stk_cd] = {
-                                    "qty": int(item.get("rmnd_qty", 0)),
-                                    "avg_price": float(item.get("avg_prc", 0))
-                                }
-                        return result
-                    else:
-                        logger.error(f"Kiwoom get_holdings failed: {await resp.text()}")
-                        return {}
+                if resp.status == 200:
+                    res = await resp.json()
+                    result = {}
+                    for item in res.get("acnt_evlt_remn_indv_tot", []):
+                        stk_cd = item.get("stk_cd", "").replace("A", "").strip()
+                        if stk_cd:
+                            result[stk_cd] = {
+                                "qty": int(item.get("rmnd_qty", 0)),
+                                "avg_price": float(item.get("avg_prc", 0))
+                            }
+                    return result
+                else:
+                    logger.error(f"Kiwoom get_holdings failed: {await resp.text()}")
+                    return {}
         except Exception as e:
             logger.error(f"Kiwoom get_holdings error: {e}")
             return {}
@@ -245,10 +245,10 @@ class KiwoomBroker(BaseBroker):
         results = {}
         session = await self._get_session()
         tasks = [fetch_single(session, sym) for sym in symbols]
-            responses = await asyncio.gather(*tasks)
-            for sym, data in responses:
-                if data is not None:
-                    results[sym] = data
+        responses = await asyncio.gather(*tasks)
+        for sym, data in responses:
+            if data is not None:
+                results[sym] = data
         return results
 
     async def connect_websocket(self, symbols: list, on_message_callback):
