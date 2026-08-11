@@ -6,10 +6,14 @@
 - **Check Before Asking**: Before modifying core data structures, always consult `ARCHITECTURE.md` first to understand the existing contract between the Android App and the Python Engine.
 
 - **Update USERGUIDE.md on Feature Changes**: Whenever you add, modify, or remove features related to the user interface, manual trading, surge trading, or API key configuration, you MUST update USERGUIDE.md to reflect the new user-facing instructions and usage methods.
+- **Update USERGUIDE.md on Feature Changes**: Whenever you add, modify, or remove features related to the user interface, manual trading, surge trading, or API key configuration, you MUST update USERGUIDE.md to reflect the new user-facing instructions and usage methods.
 
 ## Python Backend Deployment Rule
 Whenever modifying any .py code in the py-my-auto-trading Python backend project, you MUST always execute D:\01.SW\03.Tool\01.AndroidStudio\AndroidStudioProjects\MyAutoTrading\py-my-auto-trading\deploy.bat after making the changes to ensure the Oracle server backend is updated.
 
 ## Code Verification Rule
 - **Android App Changes**: Whenever you modify the Android App code (.kt, .xml, etc.), you MUST run ./gradlew assembleDebug in the app directory to verify the build completes successfully before reporting success to the user.
-- **Python Backend Changes**: Whenever you modify the Python backend code (.py), you MUST run deploy.bat to verify the deployment completes successfully before reporting success to the user.
+- **Python Backend Changes**: 
+  1. **Pre-Deploy Check**: Before deploying, you MUST run a syntax check (`python -m py_compile <modified_file.py>`) to catch any Indentation or Syntax errors locally.
+  2. **Deploy**: Run `deploy.bat` to deploy to the remote server.
+  3. **Post-Deploy Check**: After `deploy.bat` finishes, you MUST verify that the engine is actually running on the remote server (e.g., via `ssh` checking `ps aux | grep '[m]y-auto-trading.py'` or inspecting the remote `engine.log`). DO NOT assume the deployment was fully successful just because `deploy.bat` completed.

@@ -186,9 +186,10 @@ class UpbitBroker(BaseBroker):
         prices = {}
         try:
             async with aiohttp.ClientSession() as session:
-                params = {"markets": ",".join(markets)}
-                url = f"{self.base_url}/ticker"
-                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as res:
+                # 업비트 API는 %2C 인코딩을 거부할 수 있으므로 url 내에 쿼리를 하드코딩
+                markets_str = ",".join(markets)
+                url = f"{self.base_url}/ticker?markets={markets_str}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as res:
                     if res.status == 200:
                         data = await res.json()
                         return {item["market"]: (float(item["trade_price"]), float(item.get("signed_change_rate", 0))*100.0) for item in data}
@@ -345,8 +346,7 @@ class UpbitBroker(BaseBroker):
 
                         subscribe_msg = json.dumps([
                             {"ticket": str(uuid.uuid4())},
-                            {"type": "ticker", "codes": codes},
-                            {"format": "DEFAULT"},
+                            {"type": "ticker", "codes": codes}
                         ])
                         await ws.send(subscribe_msg)
 
