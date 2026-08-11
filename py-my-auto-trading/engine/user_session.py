@@ -679,8 +679,9 @@ class UserSession:
                             any_success = True
                         else:
                             logger.warning(f"Laore BUY failed for {real_symbol}: {msg}")
-                            if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg:
+                            if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg or "상이" in msg or "모의투자" in msg:
                                 critical_error = True
+                                self.fb.send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 불가(계좌/시간오류): {msg}")
                                 break
                             self.fb.send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 주문 실패: {msg}")
                             if "잔고" in msg or "초과" in msg or "부족" in msg:
@@ -696,8 +697,9 @@ class UserSession:
                                 any_success = True
                             else:
                                 logger.warning(f"Laore SELL failed for {real_symbol}: {msg}")
-                                if "영업일" in msg or "휴장" in msg:
+                                if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg or "상이" in msg or "모의투자" in msg:
                                     critical_error = True
+                                    self.fb.send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 불가(계좌/시간오류): {msg}")
                                     break
                                 self.fb.send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 주문 실패: {msg}")
                                 if "잔고" in msg or "초과" in msg or "부족" in msg:
@@ -745,4 +747,10 @@ class UserSession:
                         status['last_exec_timestamp'] = time.time()
                         self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
                     else:
-                        logger.info(f"Laore skipped updating status for {composite_key} because all orders failed.")
+                        if critical_error:
+                            status['last_exec_date'] = current_date_str
+                            status['last_exec_timestamp'] = time.time()
+                            self.fb.update_data(f"{self.account_path}/laore_status/{composite_key}", status)
+                            logger.info(f"Laore marked as executed for {composite_key} due to critical error.")
+                        else:
+                            logger.info(f"Laore skipped updating status for {composite_key} because all orders failed.")

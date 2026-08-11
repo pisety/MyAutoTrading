@@ -185,10 +185,11 @@ class UpbitBroker(BaseBroker):
         
         prices = {}
         try:
+            import yarl
             async with aiohttp.ClientSession() as session:
-                # 업비트 API는 %2C 인코딩을 거부할 수 있으므로 url 내에 쿼리를 하드코딩
+                # 업비트 API는 %2C 인코딩을 거부할 수 있으므로 url 내에 쿼리를 하드코딩하고 yarl로 인코딩 방지
                 markets_str = ",".join(markets)
-                url = f"{self.base_url}/ticker?markets={markets_str}"
+                url = yarl.URL(f"{self.base_url}/ticker?markets={markets_str}", encoded=True)
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as res:
                     if res.status == 200:
                         data = await res.json()
