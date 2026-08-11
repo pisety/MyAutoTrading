@@ -272,34 +272,34 @@ class KISBroker(BaseBroker):
             session = await self._get_session()
             if self.is_overseas:
                 url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
+                
+                for dvsn in divisions:
+                    body = {
+                        "CANO": self.account_number,
+                        "ACNT_PRDT_CD": self.acnt_prdt_cd,
+                        "OVRS_EXCG_CD": "NASD",
+                        "PDNO": symbol.strip(),
+                        "ORD_QTY": str(int(float(qty))),
+                        "OVRS_ORD_UNPR": f"{price:.4f}" if price < 1.0 else f"{price:.2f}",
+                        "ORD_SVR_DVSN_CD": "0",
+                        "ORD_DVSN": dvsn
+                    }
                     
-                    for dvsn in divisions:
-                        body = {
-                            "CANO": self.account_number,
-                            "ACNT_PRDT_CD": self.acnt_prdt_cd,
-                            "OVRS_EXCG_CD": "NASD",
-                            "PDNO": symbol.strip(),
-                            "ORD_QTY": str(int(float(qty))),
-                            "OVRS_ORD_UNPR": f"{price:.4f}" if price < 1.0 else f"{price:.2f}",
-                            "ORD_SVR_DVSN_CD": "0",
-                            "ORD_DVSN": dvsn
-                        }
-                        
-                        async with session.post(url, headers=headers, json=body, timeout=10) as res:
-                            data = await res.json()
-                            if data.get("rt_cd") == "0":
-                                logger.info(f"Order success: {side} {symbol} {qty} @ {price} (DVSN: {dvsn})")
-                                return True, "주문 성공"
+                    async with session.post(url, headers=headers, json=body, timeout=10) as res:
+                        data = await res.json()
+                        if data.get("rt_cd") == "0":
+                            logger.info(f"Order success: {side} {symbol} {qty} @ {price} (DVSN: {dvsn})")
+                            return True, "주문 성공"
+                        else:
+                            msg = data.get("msg1", "")
+                            logger.warning(f"Order failed with DVSN {dvsn}: {msg}")
+                            last_error = msg
+                            if "시간" in msg or "불가" in msg or "가능" in msg:
+                                continue # 다음 구분 코드로 재시도
                             else:
-                                msg = data.get("msg1", "")
-                                logger.warning(f"Order failed with DVSN {dvsn}: {msg}")
-                                last_error = msg
-                                if "시간" in msg or "불가" in msg or "가능" in msg:
-                                    continue # 다음 구분 코드로 재시도
-                                else:
-                                    break # 시간 관련 에러가 아니면 즉시 실패 (예: 잔고부족)
-                else:
-                    url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
+                                break # 시간 관련 에러가 아니면 즉시 실패 (예: 잔고부족)
+            else:
+                url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
                     def _round_to_tick(p_val: float) -> int:
                         p = int(p_val)
                         if p < 2000: return p
