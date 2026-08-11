@@ -629,7 +629,7 @@ class TradingRepository {
                 "last_used_timestamp" to timestamp
             )
             if (serviceType != "crypto") {
-                accountMap["accountNumber"] = info.accountNumber
+                accountMap["account_number"] = info.accountNumber
             }
             
             accRef.child("saved_accounts").child(key).setValue(accountMap)

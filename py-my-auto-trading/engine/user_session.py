@@ -374,13 +374,27 @@ class UserSession:
                         holdings_data = {}
                         if holdings:
                             for h in holdings:
-                                holdings_data[h["symbol"]] = {
-                                    "symbol": h["symbol"],
-                                    "quantity": float(h["quantity"]),
-                                    "purchase_avg_price": float(h["purchase_avg_price"]),
-                                    "current_price": float(h["current_price"]),
-                                    "profit_loss_amount": float(h["profit_loss_amount"]),
-                                    "profit_loss_rate": float(h["profit_loss_rate"]),
+                                sym = h["symbol"]
+                                qty = float(h["quantity"])
+                                pchs_avg = float(h["purchase_avg_price"])
+                                curr_price = float(h["current_price"])
+                                pfls_amt = float(h["profit_loss_amount"])
+                                pfls_rt = float(h["profit_loss_rate"])
+                                
+                                # Use real-time price if available to fix KIS mock delayed prices
+                                if sym in self.price_data and self.price_data[sym] > 0:
+                                    curr_price = self.price_data[sym]
+                                    if pchs_avg > 0:
+                                        pfls_amt = (curr_price - pchs_avg) * qty
+                                        pfls_rt = (curr_price - pchs_avg) / pchs_avg * 100.0
+
+                                holdings_data[sym] = {
+                                    "symbol": sym,
+                                    "quantity": qty,
+                                    "purchase_avg_price": pchs_avg,
+                                    "current_price": curr_price,
+                                    "profit_loss_amount": pfls_amt,
+                                    "profit_loss_rate": pfls_rt,
                                     "name": h.get("name", "")
                                 }
                         status_update["holdings"] = holdings_data
