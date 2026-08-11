@@ -300,38 +300,38 @@ class KISBroker(BaseBroker):
                                 break # 시간 관련 에러가 아니면 즉시 실패 (예: 잔고부족)
             else:
                 url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
-                    def _round_to_tick(p_val: float) -> int:
-                        p = int(p_val)
-                        if p < 2000: return p
-                        elif p < 5000: return p - (p % 5)
-                        elif p < 20000: return p - (p % 10)
-                        elif p < 50000: return p - (p % 50)
-                        elif p < 200000: return p - (p % 100)
-                        elif p < 500000: return p - (p % 500)
-                        else: return p - (p % 1000)
+                def _round_to_tick(p_val: float) -> int:
+                    p = int(p_val)
+                    if p < 2000: return p
+                    elif p < 5000: return p - (p % 5)
+                    elif p < 20000: return p - (p % 10)
+                    elif p < 50000: return p - (p % 50)
+                    elif p < 200000: return p - (p % 100)
+                    elif p < 500000: return p - (p % 500)
+                    else: return p - (p % 1000)
 
-                    actual_dvsn = ord_dvsn if ord_dvsn else ("01" if price <= 0 else "00")
-                    ord_unpr = "0" if actual_dvsn in ["01", "03"] else str(_round_to_tick(price))
-                    
-                    body = {
-                        "CANO": self.account_number,
-                        "ACNT_PRDT_CD": self.acnt_prdt_cd,
-                        "PDNO": symbol.strip(),
-                        "ORD_DVSN": actual_dvsn,
-                        "ORD_QTY": str(int(float(qty))),
-                        "ORD_UNPR": ord_unpr
-                    }
-                    async with session.post(url, headers=headers, json=body, timeout=10) as res:
-                        data = await res.json()
-                        if data.get("rt_cd") == "0":
-                            output = data.get("output", {})
-                            odno = output.get("ODNO", "") if isinstance(output, dict) else ""
-                            logger.info(f"Domestic Order success: {side} {symbol} {qty} @ {price} (ODNO: {odno})")
-                            return True, f"주문 성공|{odno}" if odno else "주문 성공"
-                        else:
-                            msg = data.get("msg1", "")
-                            logger.warning(f"Domestic Order failed: {msg}")
-                            last_error = msg
+                actual_dvsn = ord_dvsn if ord_dvsn else ("01" if price <= 0 else "00")
+                ord_unpr = "0" if actual_dvsn in ["01", "03"] else str(_round_to_tick(price))
+                
+                body = {
+                    "CANO": self.account_number,
+                    "ACNT_PRDT_CD": self.acnt_prdt_cd,
+                    "PDNO": symbol.strip(),
+                    "ORD_DVSN": actual_dvsn,
+                    "ORD_QTY": str(int(float(qty))),
+                    "ORD_UNPR": ord_unpr
+                }
+                async with session.post(url, headers=headers, json=body, timeout=10) as res:
+                    data = await res.json()
+                    if data.get("rt_cd") == "0":
+                        output = data.get("output", {})
+                        odno = output.get("ODNO", "") if isinstance(output, dict) else ""
+                        logger.info(f"Domestic Order success: {side} {symbol} {qty} @ {price} (ODNO: {odno})")
+                        return True, f"주문 성공|{odno}" if odno else "주문 성공"
+                    else:
+                        msg = data.get("msg1", "")
+                        logger.warning(f"Domestic Order failed: {msg}")
+                        last_error = msg
                                 
         except Exception as e:
             logger.error(f"Order exception: {e}")
