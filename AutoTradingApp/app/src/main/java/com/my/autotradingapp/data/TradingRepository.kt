@@ -21,10 +21,15 @@ class TradingRepository(initialUserId: String = "pisety") {
     val userId = _userId.asStateFlow()
 
     // Profile state flows
-    private val _profiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    private val defaultProfiles = listOf(
+        UserProfile("pisety", "내 계좌", "👨"),
+        UserProfile("윤1", "윤서", "👧"),
+        UserProfile("윤2", "윤하", "👶")
+    )
+    private val _profiles = MutableStateFlow<List<UserProfile>>(defaultProfiles)
     val profiles = _profiles.asStateFlow()
 
-    private val _currentProfileName = MutableStateFlow("")
+    private val _currentProfileName = MutableStateFlow("내 계좌")
     val currentProfileName = _currentProfileName.asStateFlow()
 
     private var usersListener: ValueEventListener? = null
@@ -116,6 +121,7 @@ class TradingRepository(initialUserId: String = "pisety") {
 
 
     init {
+        updateCurrentProfileName()
         listenToUsersProfiles()
         startListening(_userId.value)
         loadMarketData()
