@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.my.autotradingapp.data.UserProfile
 import com.my.autotradingapp.ui.TradingViewModel
+import com.my.autotradingapp.utils.ProfileSecurityManager
 
 @Composable
 fun ProfileManagementDialog(
@@ -31,6 +32,7 @@ fun ProfileManagementDialog(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<UserProfile?>(null) }
+    var pendingUnlockProfile by remember { mutableStateOf<UserProfile?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -64,15 +66,20 @@ fun ProfileManagementDialog(
                 ) {
                     items(profiles) { profile ->
                         val isSelected = profile.id == currentUserId
+                        val isUnlocked = ProfileSecurityManager.isProfileUnlocked(context, profile.id, profile.pin)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
                                     if (!isSelected) {
-                                        viewModel.setUserId(profile.id)
-                                        prefs.edit().putString("LastUsedUserId", profile.id).apply()
-                                        Toast.makeText(context, "${profile.name} 계정으로 전환되었습니다.", Toast.LENGTH_SHORT).show()
-                                        onDismiss()
+                                        if (isUnlocked) {
+                                            viewModel.setUserId(profile.id)
+                                            prefs.edit().putString("LastUsedUserId", profile.id).apply()
+                                            Toast.makeText(context, "${profile.name} 계정으로 전환되었습니다.", Toast.LENGTH_SHORT).show()
+                                            onDismiss()
+                                        } else {
+                                            pendingUnlockProfile = profile
+                                        }
                                     }
                                 },
                             colors = CardDefaults.cardColors(
@@ -91,7 +98,7 @@ fun ProfileManagementDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(profile.icon, fontSize = 24.sp)
+                                    Text(if (profile.pin.isNotEmpty() && !isUnlocked) "🔒" else profile.icon, fontSize = 24.sp)
                                     Column {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
@@ -103,6 +110,11 @@ fun ProfileManagementDialog(
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Badge(containerColor = MaterialTheme.colorScheme.primary) {
                                                     Text("현재 선택됨", color = Color.White, fontSize = 10.sp)
+                                                }
+                                            } else if (profile.pin.isNotEmpty() && !isUnlocked) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Badge(containerColor = MaterialTheme.colorScheme.errorContainer) {
+                                                    Text("잠김", color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 10.sp)
                                                 }
                                             }
                                         }
@@ -268,6 +280,19 @@ fun ProfileManagementDialog(
                 TextButton(onClick = { profileToDelete = null }) {
                     Text("취소")
                 }
+            }
+        )
+    }
+
+    pendingUnlockProfile?.let { target ->
+        ProfilePinDialog(
+            profile = target,
+            onDismiss = { pendingUnlockProfile = null },
+            onSuccess = {
+                viewModel.setUserId(target.id)
+                prefs.edit().putString("LastUsedUserId", target.id).apply()
+                pendingUnlockProfile = null
+                onDismiss()
             }
         )
     }

@@ -24,8 +24,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.messaging.FirebaseMessaging
 import com.my.autotradingapp.ui.TradingViewModel
 import com.my.autotradingapp.ui.theme.AutoTradingAppTheme
+import com.my.autotradingapp.data.UserProfile
 import com.my.autotradingapp.ui.components.NotificationListDialog
 import com.my.autotradingapp.ui.components.ProfileManagementDialog
+import com.my.autotradingapp.ui.components.ProfileLockScreen
+import com.my.autotradingapp.ui.components.ProfilePinDialog
+import com.my.autotradingapp.utils.ProfileSecurityManager
 import com.my.autotradingapp.ui.screens.StockScreen
 import com.my.autotradingapp.ui.screens.CryptoScreen
 import com.my.autotradingapp.ui.screens.LaoreScreen
@@ -69,9 +73,18 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
     var showNotificationDialog by remember { mutableStateOf(false) }
     var showProfileManagementDialog by remember { mutableStateOf(false) }
     val unreadCount = notifications.count { !it.read }
+
+    var unlockedProfiles by remember { mutableStateOf(setOf<String>()) }
+    var pendingProfileToUnlock by remember { mutableStateOf<UserProfile?>(null) }
     
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("TradingApp", android.content.Context.MODE_PRIVATE)
+
+    val currentProfile = profiles.find { it.id == currentUserId }
+    val isCurrentUnlocked = remember(currentUserId, currentProfile?.pin, unlockedProfiles) {
+        val pin = currentProfile?.pin ?: ""
+        pin.isEmpty() || unlockedProfiles.contains(currentUserId) || ProfileSecurityManager.isProfileUnlocked(context, currentUserId, pin)
+    }
     
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -85,8 +98,12 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             }
         }
         val lastUserId = prefs.getString("LastUsedUserId", "")
-        if (!lastUserId.isNullOrEmpty() && currentUserId != lastUserId) {
-            viewModel.setUserId(lastUserId)
+        val targetId = if (lastUserId.isNullOrEmpty() || lastUserId == "test_user") "pisety" else lastUserId
+        if (currentUserId != targetId) {
+            viewModel.setUserId(targetId)
+        }
+        if (lastUserId == "test_user" || lastUserId.isNullOrEmpty()) {
+            prefs.edit().putString("LastUsedUserId", targetId).apply()
         }
     }
 
@@ -153,17 +170,24 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                         ) {
                             items(profiles) { profile ->
                                 val isSelected = profile.id == currentUserId
+                                val isUnlocked = profile.pin.isEmpty() ||
+                                    unlockedProfiles.contains(profile.id) ||
+                                    ProfileSecurityManager.isProfileUnlocked(context, profile.id, profile.pin)
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = {
                                         if (!isSelected) {
-                                            viewModel.setUserId(profile.id)
-                                            prefs.edit().putString("LastUsedUserId", profile.id).apply()
+                                            if (isUnlocked) {
+                                                viewModel.setUserId(profile.id)
+                                                prefs.edit().putString("LastUsedUserId", profile.id).apply()
+                                            } else {
+                                                pendingProfileToUnlock = profile
+                                            }
                                         }
                                     },
                                     label = {
                                         Text(
-                                            text = "${profile.icon} ${profile.name}",
+                                            text = if (profile.pin.isNotEmpty() && !isUnlocked) "🔒 ${profile.name}" else "${profile.icon} ${profile.name}",
                                             fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
@@ -217,35 +241,47 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                 .imePadding()
                 .fillMaxSize()
         ) {
-            when (selectedTab) {
-                0 -> {
-                    if (showStockSetup) {
-                        StockAccountSetupScreen(
-                            onDismiss = { showStockSetup = false },
-                            viewModel = viewModel
-                        )
-                    } else {
-                        StockScreen(
-                            viewModel = viewModel,
-                            onSettingsClick = { showStockSetup = true }
-                        )
+            if (!isCurrentUnlocked && currentProfile != null) {
+                ProfileLockScreen(
+                    profile = currentProfile,
+                    onUnlockClick = {
+                        pendingProfileToUnlock = currentProfile
+                    },
+                    onSwitchProfileClick = {
+                        showProfileManagementDialog = true
                     }
-                }
-                1 -> {
-                    if (showCryptoSetup) {
-                        CryptoAccountSetupScreen(
-                            onDismiss = { showCryptoSetup = false },
-                            viewModel = viewModel
-                        )
-                    } else {
-                        CryptoScreen(
-                            viewModel = viewModel,
-                            onSettingsClick = { showCryptoSetup = true }
-                        )
+                )
+            } else {
+                when (selectedTab) {
+                    0 -> {
+                        if (showStockSetup) {
+                            StockAccountSetupScreen(
+                                onDismiss = { showStockSetup = false },
+                                viewModel = viewModel
+                            )
+                        } else {
+                            StockScreen(
+                                viewModel = viewModel,
+                                onSettingsClick = { showStockSetup = true }
+                            )
+                        }
                     }
-                }
-                2 -> {
-                    LaoreScreen(viewModel = viewModel)
+                    1 -> {
+                        if (showCryptoSetup) {
+                            CryptoAccountSetupScreen(
+                                onDismiss = { showCryptoSetup = false },
+                                viewModel = viewModel
+                            )
+                        } else {
+                            CryptoScreen(
+                                viewModel = viewModel,
+                                onSettingsClick = { showCryptoSetup = true }
+                            )
+                        }
+                    }
+                    2 -> {
+                        LaoreScreen(viewModel = viewModel)
+                    }
                 }
             }
         }
@@ -264,6 +300,22 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
         ProfileManagementDialog(
             viewModel = viewModel,
             onDismiss = { showProfileManagementDialog = false }
+        )
+    }
+
+    pendingProfileToUnlock?.let { target ->
+        ProfilePinDialog(
+            profile = target,
+            onDismiss = { pendingProfileToUnlock = null },
+            onSuccess = {
+                val targetId = target.id
+                unlockedProfiles = unlockedProfiles + targetId
+                if (currentUserId != targetId) {
+                    viewModel.setUserId(targetId)
+                    prefs.edit().putString("LastUsedUserId", targetId).apply()
+                }
+                pendingProfileToUnlock = null
+            }
         )
     }
 }

@@ -308,7 +308,9 @@ class MeritzBroker(BaseBroker):
                             continue
                         crcd = str(c_item.get("crcd", "")).upper()
                         if crcd == "USD" or not avail_cash:
-                            amt = float(c_item.get("frcr_amt") or c_item.get("estm_frcr_amt") or 0.0)
+                            frcr = float(c_item.get("frcr_amt") or 0.0)
+                            estm = float(c_item.get("estm_frcr_amt") or 0.0)
+                            amt = frcr if frcr > 0 else estm
                             if amt > 0 or crcd == "USD":
                                 avail_cash = amt
                                 if crcd == "USD":

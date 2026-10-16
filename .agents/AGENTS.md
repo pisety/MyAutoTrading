@@ -12,7 +12,9 @@
 Whenever modifying any .py code in the py-my-auto-trading Python backend project, you MUST always execute D:\01.SW\03.Tool\01.AndroidStudio\AndroidStudioProjects\MyAutoTrading\py-my-auto-trading\deploy.bat after making the changes to ensure the Oracle server backend is updated.
 
 ## Code Verification Rule
-- **Android App Changes**: Whenever you modify the Android App code (.kt, .xml, etc.), you MUST run ./gradlew assembleDebug in the app directory to verify the build completes successfully before reporting success to the user.
+- **Android App Changes**: 
+  1. **Build Verification**: Whenever you modify the Android App code (.kt, .xml, etc.), you MUST run `./gradlew assembleDebug` in the app directory to verify the build completes successfully before reporting success to the user.
+  2. **APK Deployment**: After the build completes, copy the generated APK to `AutoTradingApp/releases/AutoTradingApp-debug.apk` and commit & push it to GitHub so that the user can immediately download the latest APK from `https://github.com/pisety/MyAutoTrading/blob/main/AutoTradingApp/releases/AutoTradingApp-debug.apk`.
 - **Python Backend Changes**: 
   1. **Pre-Deploy Check**: Before deploying, you MUST run a syntax check (`python -m py_compile <modified_file.py>`) to catch any Indentation or Syntax errors locally.
   2. **Deploy**: Run `deploy.bat` to deploy to the remote server.
