@@ -32,6 +32,7 @@ fun ProfileManagementDialog(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var profileToDelete by remember { mutableStateOf<UserProfile?>(null) }
+    var profileToEdit by remember { mutableStateOf<UserProfile?>(null) }
     var pendingUnlockProfile by remember { mutableStateOf<UserProfile?>(null) }
 
     AlertDialog(
@@ -96,7 +97,8 @@ fun ProfileManagementDialog(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
                                 ) {
                                     Text(if (profile.pin.isNotEmpty() && !isUnlocked) "🔒" else profile.icon, fontSize = 24.sp)
                                     Column {
@@ -126,11 +128,24 @@ fun ProfileManagementDialog(
                                     }
                                 }
 
-                                if (!isSelected) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(
-                                        onClick = { profileToDelete = profile }
+                                        onClick = {
+                                            if (profile.pin.isNotEmpty() && !isUnlocked) {
+                                                pendingUnlockProfile = profile
+                                            } else {
+                                                profileToEdit = profile
+                                            }
+                                        }
                                     ) {
-                                        Text("🗑️", fontSize = 16.sp)
+                                        Text("✏️", fontSize = 16.sp)
+                                    }
+                                    if (!isSelected) {
+                                        IconButton(
+                                            onClick = { profileToDelete = profile }
+                                        ) {
+                                            Text("🗑️", fontSize = 16.sp)
+                                        }
                                     }
                                 }
                             }
@@ -153,22 +168,25 @@ fun ProfileManagementDialog(
         }
     )
 
-    // 새 프로필 추가 서브 다이얼로그
+    // 새 프로필 추가 서브 다이얼로그 (이름만 입력받고 유니크 ID는 자동 생성)
     if (showAddDialog) {
         var newNameInput by remember { mutableStateOf("") }
-        var newIdInput by remember { mutableStateOf("") }
         var isChecking by remember { mutableStateOf(false) }
         var errorMessage by remember { mutableStateOf("") }
 
         AlertDialog(
             onDismissRequest = { if (!isChecking) showAddDialog = false },
-            title = { Text("새 프로필 추가", fontWeight = FontWeight.Bold) },
+            title = { Text("새 가족 프로필 추가", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("추가할 가족 또는 본인의 별칭과 고유 ID를 입력하세요.", fontSize = 13.sp)
+                    Text(
+                        text = "추가할 가족 또는 본인의 프로필 이름을 입력하세요.\n고유 ID는 시스템에서 자동으로 생성되어 안전하게 관리됩니다.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
                     OutlinedTextField(
                         value = newNameInput,
@@ -176,18 +194,7 @@ fun ProfileManagementDialog(
                             newNameInput = it
                             errorMessage = ""
                         },
-                        label = { Text("프로필 이름 / 별칭 (예: 와이프, 나래, 둘째)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    OutlinedTextField(
-                        value = newIdInput,
-                        onValueChange = { 
-                            newIdInput = it.trim()
-                            errorMessage = ""
-                        },
-                        label = { Text("고유 ID (Firebase 노드명, 예: narae)") },
+                        label = { Text("프로필 이름 (예: 와이프, 나래, 둘째)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -207,31 +214,29 @@ fun ProfileManagementDialog(
                     enabled = !isChecking,
                     onClick = {
                         val cleanName = newNameInput.trim()
-                        val cleanId = newIdInput.trim()
                         if (cleanName.isEmpty()) {
                             errorMessage = "프로필 이름을 입력해주세요."
                             return@Button
                         }
-                        if (cleanId.isEmpty()) {
-                            errorMessage = "고유 ID를 입력해주세요."
-                            return@Button
-                        }
 
                         isChecking = true
-                        viewModel.checkUserIdExists(cleanId) { exists ->
-                            isChecking = false
-                            if (exists) {
-                                errorMessage = "🚫 이미 사용 중인 사용자 ID입니다. 다른 이름을 입력해주세요."
-                            } else {
-                                // 신규 생성
-                                viewModel.setProfileName(cleanId, cleanName)
-                                viewModel.setUserId(cleanId)
-                                prefs.edit().putString("LastUsedUserId", cleanId).apply()
-                                Toast.makeText(context, "'${cleanName}' 프로필이 생성되었습니다. 증권사 계좌를 등록해주세요.", Toast.LENGTH_LONG).show()
-                                showAddDialog = false
-                                onDismiss()
+                        fun createUniqueProfile() {
+                            val generatedId = "user_" + java.util.UUID.randomUUID().toString().replace("-", "").take(8).lowercase()
+                            viewModel.checkUserIdExists(generatedId) { exists ->
+                                if (exists) {
+                                    createUniqueProfile()
+                                } else {
+                                    isChecking = false
+                                    viewModel.setProfileName(generatedId, cleanName)
+                                    viewModel.setUserId(generatedId)
+                                    prefs.edit().putString("LastUsedUserId", generatedId).apply()
+                                    Toast.makeText(context, "'${cleanName}' 프로필이 생성되었습니다. 증권사 계좌를 등록해주세요.", Toast.LENGTH_LONG).show()
+                                    showAddDialog = false
+                                    onDismiss()
+                                }
                             }
                         }
+                        createUniqueProfile()
                     }
                 ) {
                     if (isChecking) {
@@ -245,6 +250,73 @@ fun ProfileManagementDialog(
                 TextButton(
                     enabled = !isChecking,
                     onClick = { showAddDialog = false }
+                ) {
+                    Text("취소")
+                }
+            }
+        )
+    }
+
+    // 프로필 이름 수정 서브 다이얼로그
+    profileToEdit?.let { target ->
+        var editedName by remember(target.id) { mutableStateOf(target.name) }
+        var isSaving by remember { mutableStateOf(false) }
+        var editError by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) profileToEdit = null },
+            title = { Text("프로필 이름 수정", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("변경할 프로필 이름을 입력하세요.", fontSize = 13.sp)
+
+                    OutlinedTextField(
+                        value = editedName,
+                        onValueChange = {
+                            editedName = it
+                            editError = ""
+                        },
+                        label = { Text("프로필 이름") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    if (editError.isNotEmpty()) {
+                        Text(
+                            text = editError,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !isSaving,
+                    onClick = {
+                        val cleanName = editedName.trim()
+                        if (cleanName.isEmpty()) {
+                            editError = "프로필 이름을 입력해주세요."
+                            return@Button
+                        }
+                        isSaving = true
+                        viewModel.setProfileName(target.id, cleanName)
+                        Toast.makeText(context, "프로필 이름이 '${cleanName}'(으)로 변경되었습니다.", Toast.LENGTH_SHORT).show()
+                        isSaving = false
+                        profileToEdit = null
+                    }
+                ) {
+                    Text("저장")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = { profileToEdit = null }
                 ) {
                     Text("취소")
                 }
