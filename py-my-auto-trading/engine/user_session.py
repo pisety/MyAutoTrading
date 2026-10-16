@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from brokers.kis_broker import KISBroker
 from brokers.kiwoom_broker import KiwoomBroker
 from brokers.upbit_broker import UpbitBroker
+from brokers.meritz_broker import MeritzBroker
 from database.firebase_client import FirebaseClient
 from models.schemas import Settings, AccountData, OrderCommand, ConditionalOrder, StopLossOrder
 import crypto_utils
@@ -97,13 +98,26 @@ class UserSession:
         self._main_task = asyncio.create_task(self._session_loop())
         self._main_task.add_done_callback(_task_error_callback)
 
+    async def _cleanup_broker(self, broker):
+        if not broker:
+            return
+        try:
+            await broker.close_websocket()
+        except Exception:
+            pass
+        try:
+            if hasattr(broker, "close"):
+                await broker.close()
+        except Exception:
+            pass
+
     async def stop(self):
         logger.info(f"Stopping session for user: {self.uid}")
         self._running = False
         if self._main_task:
             self._main_task.cancel()
         if self.broker:
-            await self.broker.close_websocket()
+            await self._cleanup_broker(self.broker)
         
         self.fb.remove_listener(f"{self.base_path}/account_data")
         paths = ["settings", "manual_orders", "conditional_orders", "stop_loss_orders"]
@@ -143,9 +157,10 @@ class UserSession:
         active_id = self.account_data.active_account_id
         if active_id and active_id in self.account_data.saved_accounts:
             acc = self.account_data.saved_accounts[active_id]
-            if acc.broker == "KIS" or acc.broker == "한국투자":
-                if self.broker:
-                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
+            old_broker = self.broker
+            if acc.broker in ("KIS", "한국투자", "한국투자증권"):
+                if old_broker:
+                    self._loop.create_task(self._cleanup_broker(old_broker)).add_done_callback(_task_error_callback)
                     
                 is_mock = getattr(acc, "is_mock", getattr(acc, "is_kis_mock", False))
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
@@ -157,9 +172,9 @@ class UserSession:
                         
                 self._last_balance_check = 0.0 
                 self._restart_websocket()
-            elif acc.broker == "키움" or acc.broker == "Kiwoom":
-                if self.broker:
-                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
+            elif acc.broker in ("키움", "Kiwoom", "키움증권"):
+                if old_broker:
+                    self._loop.create_task(self._cleanup_broker(old_broker)).add_done_callback(_task_error_callback)
                 is_mock = getattr(acc, "is_mock", True)
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
                 decrypted_secret = crypto_utils.decrypt(acc.app_secret).strip() if acc.app_secret else ""
@@ -172,8 +187,8 @@ class UserSession:
                 self._last_balance_check = 0.0
                 self._restart_websocket()
             elif acc.broker in ("업비트", "Upbit"):
-                if self.broker:
-                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
+                if old_broker:
+                    self._loop.create_task(self._cleanup_broker(old_broker)).add_done_callback(_task_error_callback)
                 decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
                 decrypted_secret = crypto_utils.decrypt(acc.app_secret).strip() if acc.app_secret else ""
                 self.broker = UpbitBroker(decrypted_key, decrypted_secret)
@@ -183,10 +198,23 @@ class UserSession:
 
                 self._last_balance_check = 0.0
                 self._restart_websocket()
+            elif acc.broker in ("메리츠", "Meritz", "메리츠증권"):
+                if old_broker:
+                    self._loop.create_task(self._cleanup_broker(old_broker)).add_done_callback(_task_error_callback)
+                is_mock = getattr(acc, "is_mock", False)
+                decrypted_key = crypto_utils.decrypt(acc.app_key).strip() if acc.app_key else ""
+                decrypted_secret = crypto_utils.decrypt(acc.app_secret).strip() if acc.app_secret else ""
+                self.broker = MeritzBroker(decrypted_key, decrypted_secret, acc.account_number, is_mock=is_mock, is_overseas=acc.is_overseas)
+                logger.info(f"[{self.uid}] Broker configured: {acc.broker} ({active_id}) - Mock: {is_mock}, OS: {acc.is_overseas}")
+
+                self._load_initial_price_data()
+
+                self._last_balance_check = 0.0
+                self._restart_websocket()
             else:
                 logger.info(f"[{self.uid}] Unsupported broker selected: {acc.broker}")
-                if self.broker:
-                    self._loop.create_task(self.broker.close_websocket()).add_done_callback(_task_error_callback)
+                if old_broker:
+                    self._loop.create_task(self._cleanup_broker(old_broker)).add_done_callback(_task_error_callback)
                     self.broker = None
                 
                 self.price_data.clear()
@@ -284,19 +312,54 @@ class UserSession:
 
     async def _execute_manual_order(self, cmd, sym, qty, price):
         if not self.broker:
+            self.fb.update_data(f"{self.account_path}/manual_orders", {
+                "command": "NONE",
+                "status": "FAILED",
+                "error_message": "활성화된 증권사/거래소 브로커가 없습니다."
+            })
             return
-        
-        if not price or price <= 0.0:
-            price = self.price_data.get(sym)
-            
-        if not price or price <= 0.0:
-            logger.warning(f"[{self.uid}] Cannot execute manual order: No price data for {sym}")
-            return
-            
-        success, err_msg = await self.broker.execute_order(sym, cmd, qty, price, True)
+
+        order_price = float(price) if price and price > 0.0 else 0.0
+
+        # 시장가(price <= 0) 요청 시 브로커별 처리:
+        # 1) 국내주식(KIS/메리츠/키움) 및 메리츠 해외주식, 업비트 매도(SELL)는 price=0.0 시장가 주문을 직접 지원
+        # 2) KIS 해외주식은 지정가만 지원하므로 현재가를 조회하여 지정가로 전송
+        # 3) 업비트 시장가 매수(BUY)는 총 매수금액(qty * current_price)이 필요하므로 현재가 조회
+        is_kis_overseas = (self.broker.__class__.__name__ == "KISBroker" and getattr(self.broker, "is_overseas", False))
+        is_upbit_market_buy = (self.service_type == "crypto" and cmd == "BUY" and order_price <= 0.0)
+
+        if order_price <= 0.0 and (is_kis_overseas or is_upbit_market_buy):
+            cur_p = self.price_data.get(sym)
+            if not cur_p or cur_p <= 0.0:
+                try:
+                    fetched = await self.broker.fetch_rest_current_prices([sym])
+                    val = fetched.get(sym)
+                    if isinstance(val, (tuple, list)):
+                        cur_p = float(val[0])
+                    elif val:
+                        cur_p = float(val)
+                except Exception as e:
+                    logger.warning(f"[{self.uid}] Failed to fetch fallback price for manual order {sym}: {e}")
+
+            if not cur_p or cur_p <= 0.0:
+                logger.warning(f"[{self.uid}] Cannot execute manual order: No price data for {sym}")
+                self.fb.update_data(f"{self.account_path}/manual_orders", {
+                    "command": "NONE",
+                    "status": "FAILED",
+                    "error_message": f"[{sym}] 현재가를 조회할 수 없어 주문을 실행하지 못했습니다."
+                })
+                return
+
+            if is_upbit_market_buy:
+                qty = float(qty) * cur_p
+                order_price = 0.0
+            else:
+                order_price = cur_p
+
+        success, err_msg = await self.broker.execute_order(sym, cmd, qty, order_price, True)
         if success:
-            logger.info(f"[{self.uid}] Manual order executed: {cmd} {sym} {qty}")
-            self.fb.send_push_notification(self.uid, "수동 주문 체결", f"[{sym}] {cmd} {qty} 주문이 체결되었습니다.")
+            logger.info(f"[{self.uid}] Manual order executed: {cmd} {sym} {qty} @ {order_price}")
+            await self.fb.async_send_push_notification(self.uid, "수동 주문 체결", f"[{sym}] {cmd} {qty} 주문이 체결되었습니다.")
             self.fb.update_data(f"{self.account_path}/manual_orders", {
                 "command": "NONE",
                 "status": "SUCCESS",
@@ -448,6 +511,7 @@ class UserSession:
 
     async def _check_conditional_orders(self):
         to_remove = []
+        is_kis_overseas = (self.broker.__class__.__name__ == "KISBroker" and getattr(self.broker, "is_overseas", False))
         for oid, order in self.conditional_orders.items():
             price = self.price_data.get(order.symbol)
             if not price: continue
@@ -456,10 +520,15 @@ class UserSession:
                         (order.side == "SELL" and price >= order.target_price)
                         
             if triggered:
-                # 목표가 도달 시 시장가(0.0)로 전송하여 즉시 체결 유도
-                success, _ = await self.broker.execute_order(order.symbol, order.side, order.quantity, 0.0, order.allow_extended_hours)
+                # 목표가 도달 시 즉시 체결 유도 (단, KIS 해외주식은 지정가만 지원하므로 현재가로 전송)
+                exec_qty = order.quantity
+                exec_price = price if is_kis_overseas else 0.0
+                if self.service_type == "crypto" and order.side == "BUY":
+                    exec_qty = float(order.quantity) * float(price)
+                    exec_price = 0.0
+                success, _ = await self.broker.execute_order(order.symbol, order.side, exec_qty, exec_price, order.allow_extended_hours)
                 if success:
-                    self.fb.send_push_notification(self.uid, "조건부 주문 체결", f"[{order.symbol}] {order.side} {order.quantity} 주문이 체결되었습니다.")
+                    await self.fb.async_send_push_notification(self.uid, "조건부 주문 체결", f"[{order.symbol}] {order.side} {order.quantity} 주문이 체결되었습니다.")
                     self.fb.update_data(f"{self.account_path}/conditional_orders/{oid}", {
                         "status": "EXECUTED",
                         "executed_at": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
@@ -472,6 +541,7 @@ class UserSession:
 
     async def _check_stop_loss(self):
         to_remove = []
+        is_kis_overseas = (self.broker.__class__.__name__ == "KISBroker" and getattr(self.broker, "is_overseas", False))
         for oid, order in self.stop_loss_orders.items():
             price = self.price_data.get(order.symbol)
             if not price: continue
@@ -486,10 +556,11 @@ class UserSession:
                         qty = total_qty * (order.volume_percent / 100.0)
                         
                 if qty > 0:
-                    # 손절은 무조건 시장가(0.0)로 전송하여 즉시 체결 유도
-                    success, _ = await self.broker.execute_order(order.symbol, "SELL", qty, 0.0, order.allow_extended_hours)
+                    # 손절은 즉시 체결 유도 (단, KIS 해외주식은 지정가만 지원하므로 현재가로 전송)
+                    exec_price = price if is_kis_overseas else 0.0
+                    success, _ = await self.broker.execute_order(order.symbol, "SELL", qty, exec_price, order.allow_extended_hours)
                     if success:
-                        self.fb.send_push_notification(self.uid, "자동 손절매 체결", f"[{order.symbol}] SELL {qty} 주문이 체결되었습니다.")
+                        await self.fb.async_send_push_notification(self.uid, "자동 손절매 체결", f"[{order.symbol}] SELL {qty} 주문이 체결되었습니다.")
                         self.fb.update_data(f"{self.account_path}/stop_loss_orders/{oid}", {
                             "status": "EXECUTED",
                             "executed_at": datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S"),
@@ -541,7 +612,7 @@ class UserSession:
     async def _execute_surge_buy(self, symbol, qty, price, allow_extended, config_idx=None):
         success, _ = await self.broker.execute_order(symbol, "BUY", qty, price, allow_extended)
         if success:
-            self.fb.send_push_notification(self.uid, "급등주 매수 체결", f"[{symbol}] BUY {qty} 주문이 체결되었습니다.")
+            await self.fb.async_send_push_notification(self.uid, "급등주 매수 체결", f"[{symbol}] BUY {qty} 주문이 체결되었습니다.")
             self.last_surge_buy_time[symbol] = time.time()
             
             if config_idx is not None:
@@ -563,7 +634,7 @@ class UserSession:
         laore_settings = self.fb.get_data(f"{self.account_path}/laore_settings") or {}
         if not isinstance(laore_settings, dict): return
         
-        laore_status_map = self.fb.get_data(f"{self.account_path}/laore_status") or {}
+        laore_status_map = await self.fb.async_get_data(f"{self.account_path}/laore_status") or {}
         if not isinstance(laore_status_map, dict):
             laore_status_map = {}
         
@@ -617,8 +688,12 @@ class UserSession:
                 if not current_price:
                     try:
                         prices = await self.broker.fetch_rest_current_prices([real_symbol])
-                        current_price = prices.get(real_symbol)
-                    except:
+                        val = prices.get(real_symbol)
+                        if isinstance(val, (tuple, list)):
+                            current_price = float(val[0])
+                        elif val:
+                            current_price = float(val)
+                    except Exception:
                         pass
                         
                 if not current_price: continue
@@ -695,9 +770,9 @@ class UserSession:
                             logger.warning(f"Laore BUY failed for {real_symbol}: {msg}")
                             if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg or "상이" in msg or "모의투자" in msg:
                                 critical_error = True
-                                self.fb.send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 불가(계좌/시간오류): {msg}")
+                                await self.fb.async_send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 불가(계좌/시간오류): {msg}")
                                 break
-                            self.fb.send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 주문 실패: {msg}")
+                            await self.fb.async_send_push_notification(self.uid, "무한매수 매수 실패", f"[{real_symbol}] 매수 주문 실패: {msg}")
                             if "잔고" in msg or "초과" in msg or "부족" in msg:
                                 critical_error = True
                                 break
@@ -713,9 +788,9 @@ class UserSession:
                                 logger.warning(f"Laore SELL failed for {real_symbol}: {msg}")
                                 if "영업일" in msg or "휴장" in msg or "장시작전" in msg or "장시작 전" in msg or "상이" in msg or "모의투자" in msg:
                                     critical_error = True
-                                    self.fb.send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 불가(계좌/시간오류): {msg}")
+                                    await self.fb.async_send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 불가(계좌/시간오류): {msg}")
                                     break
-                                self.fb.send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 주문 실패: {msg}")
+                                await self.fb.async_send_push_notification(self.uid, "무한매수 매도 실패", f"[{real_symbol}] 매도 주문 실패: {msg}")
                                 if "잔고" in msg or "초과" in msg or "부족" in msg:
                                     critical_error = True
                                     break

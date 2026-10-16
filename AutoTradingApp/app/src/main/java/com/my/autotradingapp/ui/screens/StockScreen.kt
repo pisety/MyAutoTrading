@@ -61,7 +61,7 @@ fun StockScreen(
     val isOverseas = activeAcc?.isOverseas ?: true
     val isMock = activeAcc?.isMock ?: true
     val brokerName = activeAcc?.broker ?: "설정안됨"
-    val isKisRealDomestic = (brokerName == "한국투자" || brokerName == "한국투자증권") && !isMock && !isOverseas
+    val isKisRealDomestic = brokerName in listOf("한국투자", "한국투자증권", "메리츠", "메리츠증권") && !isMock && !isOverseas
     var showReservationDialog by remember { mutableStateOf(false) }
     val reservationOrders by viewModel.reservationOrders.collectAsState()
     val suggestions = status.stockNames

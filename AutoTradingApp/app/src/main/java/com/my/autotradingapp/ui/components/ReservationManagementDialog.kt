@@ -162,7 +162,7 @@ fun ReservationManagementDialog(
         title = { 
             Column {
                 Text("🚀 장전시간외 매수 주문예약 관리", fontWeight = FontWeight.Bold)
-                Text("한국투자증권 실전 국내주식 전용 (오후 4시 전송 -> 아침 8시 검증)", fontSize = 12.sp, color = Color.Gray)
+                Text("실전 국내주식 전용 (한국투자/메리츠 · 08:00 검증 ➔ 08:20 대기열 선점)", fontSize = 12.sp, color = Color.Gray)
             }
         },
         text = {

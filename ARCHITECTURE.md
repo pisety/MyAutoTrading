@@ -25,6 +25,7 @@ flowchart TD
         Watcher["Surge Monitor (급등 감시)"]
         Broker_KIS["한국투자증권 API"]
         Broker_Kiwoom["키움증권 REST API"]
+        Broker_Meritz["메리츠증권 Open API"]
         Broker_Crypto["Upbit API"]
     end
 
@@ -37,6 +38,7 @@ flowchart TD
     
     Watcher <-->|Fetch Price & Order| Broker_KIS
     Watcher <-->|Fetch Price & Order| Broker_Kiwoom
+    Watcher <-->|Fetch Price & Order| Broker_Meritz
     Watcher <-->|Fetch Price & Order| Broker_Crypto
 ```
 
@@ -49,6 +51,18 @@ flowchart TD
    - Python 엔진의 백그라운드 태스크가 업비트/한국투자증권 API를 지속적으로 호출하여 현재 가격, 총 자산, 보유 주식 수 등을 가져옵니다.
    - 주기적으로 Firebase의 `/status` 경로에 덮어씁니다.
    - Android 앱은 `/status` 경로의 `addValueEventListener`를 통해 상태를 즉시 넘겨받아 화면(Compose)을 다시 그립니다(Recomposition).
+
+### 1.2 다중 사용자 및 가족 프로필 아키텍처 (Multi-Profile Architecture)
+- **개념:** 한 대의 스마트폰에서 본인뿐만 아니라 가족(자녀 윤서, 윤하 등)의 여러 증권사 계정을 원클릭으로 전환하여 관리할 수 있는 프로필 체계입니다.
+- **Firebase 노드 구조:**
+  - `users/{UID}`가 곧 하나의 독립된 프로필이 되며, 하위에 `profile_name` 메타데이터(예: "내 계좌", "윤서", "윤하")를 보관합니다.
+  - 각 프로필 하위의 `stock`, `crypto` 경로는 완전히 격리되어 브로커 API Key, 계좌번호, 자동매매 설정, 잔고가 독립적으로 관리됩니다.
+- **백엔드 멀티 세션 병렬 구동:**
+  - 오라클 클라우드의 `UserManager`가 `users/` 루트를 감시하여 등록된 모든 UID에 대해 각각 `UserSession`을 동시에 24시간 가동합니다.
+  - 푸시 알림 전송 시 `users/{UID}/profile_name`을 조회하여 `🔔 [윤서] 장전시간외 체결 완료`와 같이 프로필명을 알림 제목에 자동으로 부착합니다.
+- **클라이언트 UI/UX (원클릭 프로필 스위처):**
+  - 앱 최상단 앱바에 프로필 칩(`[👨 내 계좌] [👧 윤서] [👶 윤하]`)이 실시간 표시되며, 터치 한 번으로 0.1초 만에 전체 화면 데이터(주식/코인/무한매수)가 해당 프로필로 전환됩니다.
+  - 신규 프로필 생성 시 Firebase 상의 중복 ID 여부를 사전에 검증하여 기존 계정 덮어쓰기를 방지합니다.
 
 ---
 
@@ -64,10 +78,10 @@ flowchart TD
 - Firebase의 `/commands` 경로에 주문 데이터(종목, 가격, 수량, 종류)가 Push되며, Python 서버가 이 경로를 리스닝하다가 새로운 명령이 들어오면 증권사 API를 통해 실제 주문을 실행하고 로그를 남긴 뒤 해당 명령을 데이터베이스에서 삭제(소모)합니다.
 
 ### 2.3 장전시간외 매수 대기열 선점 및 미국장 연동 자동 취소
-- **개념:** 정규장 개시 전(08:20) 장전시간외 종가 매수를 위해 08:20:00.020 정각에 매수 주문을 발송하여 대기열을 선점하고, 미국 증시 시황에 따라 08:00에 주문을 미리 취소하는 지능형 스케줄링 시스템입니다.
-- **네트워크 노이즈 제거 (08:19:50 Pre-fetch):** 08:20 정각 발주 시 발생할 수 있는 데이터베이스 조회 및 API 토큰 갱신 딜레이를 없애기 위해 08:19:50에 미리 예약 주문 목록을 조회하고 토큰을 갱신합니다.
-- **정밀 타격 및 비동기 병렬 발주:** `engine/reservation_manager.py`가 08:20:00.000 정각까지 대기한 후, KIS 메인 서버의 미세한 지연(Clock Drift)을 고려하여 08:20:00.020에 asyncio를 통해 모든 사용자/종목 주문을 병렬로 동시 발주(ORD_DVSN: 05)합니다.
-- **미국장 연동 자동 취소 (08:00 스케줄러):** 국내 상장 해외 ETF를 대상으로, 평일 15:30 기준가 스냅샷과 다음날 05:00 정규장 마감가 스냅샷을 비교합니다. 08:00에 상위 구성 종목들의 밤사이 등락률을 산술 평균하여, 기준치 미만일 경우 주문을 자동 취소합니다. (주말 및 휴일에는 스케줄러와 스냅샷이 작동하지 않도록 영업일 필터링 적용)
+- **개념:** 정규장 개시 전(08:20) 장전시간외 종가 매수를 위해 08:20:00.020 정각에 매수 주문을 발송하여 대기열을 선점하고, 미국 증시 시황에 따라 08:00에 주문을 미리 취소하는 지능형 스케줄링 시스템입니다. (한국투자증권 및 메리츠증권 실전 국내계좌 모두 지원)
+- **네트워크 노이즈 제거 (08:19:50 Pre-fetch):** 08:20 정각 발주 시 발생할 수 있는 데이터베이스 조회 및 API 토큰 갱신 딜레이를 없애기 위해 08:19:50에 미리 예약 주문 목록을 조회하고 대상 계좌의 토큰을 사전 갱신합니다.
+- **정밀 타격 및 비동기 병렬 발주:** `engine/reservation_manager.py`가 08:20:00.000 정각까지 대기한 후, 증권사 서버의 미세한 지연(Clock Drift)을 고려하여 08:20:00.020에 asyncio를 통해 모든 사용자/종목 주문을 병렬로 동시 발주(KIS `ORD_DVSN: 05`, 메리츠 `oder_cls_code: 61`)합니다.
+- **미국장 연동 자동 취소 (08:00 스케줄러):** 국내 상장 해외 ETF를 대상으로, 평일 15:30 기준가 스냅샷(한국투자/메리츠 실전 해외계좌 시세 연동)과 다음날 05:00 정규장 마감가 스냅샷을 비교합니다. 08:00에 상위 구성 종목들의 밤사이 등락률을 산술 평균하여, 기준치 미만일 경우 주문을 자동 취소합니다. (주말 및 휴일에는 스케줄러와 스냅샷이 작동하지 않도록 영업일 필터링 적용)
 
 ### 2.4 라오어 무한매수법 대시보드 및 실시간 잔고 동기화 (Laore Dashboard & Balance Sync)
 - **평단가 vs 현재가 비교:** `MainActivity.kt`의 무한매수 카드 레이아웃에 실제 보유 평단가와 시장 실시간 현재가를 나란히 배치하여 즉각적인 손익 및 단가 비교를 제공합니다.
@@ -86,10 +100,11 @@ flowchart TD
 - **`my-auto-trading.py` (엔트리 포인트):** 메인 실행 파일이며, 로거(Logger) 세팅 및 모든 백그라운드 루프(asyncio.gather)를 실행시킵니다.
 - **`engine/user_manager.py`:** 다중 사용자 세션을 관리합니다. Firebase의 `users` 경로를 리스닝하여 사용자별 주식/코인 세션을 자동으로 생성하고 파괴합니다. 하위 경로 삭제 시 세션이 잘못 종료되지 않도록 보호 로직이 포함되어 있습니다.
 - **`engine/user_session.py`:** Firebase와의 통신을 전담하며, 상태(Status)를 업데이트하거나 앱에서 넘어오는 명령(Commands)과 설정(Settings)을 콜백으로 받아 처리합니다.
-- **`engine/reservation_manager.py`:** 장전 시간외 매수 주문예약 데이터를 감시하고 도달 시점에 자동 매수 주문을 발주하는 스케줄러 모듈입니다.
+- **`engine/reservation_manager.py`:** 장전 시간외 매수 주문예약 데이터를 감시하고 도달 시점에 자동 매수 주문을 발주하는 스케줄러 모듈입니다. 한국투자증권 및 메리츠증권 실전 계좌를 모두 지원하며 일회용(Ghost) 브로커의 HTTP 세션을 안전하게 정리합니다.
 - **`engine/etf_analyzer.py`:** 미국/국내 대표 ETF(TIGER 미국테크TOP10 등) 구성 종목 및 비중 정보를 분석하고 크롤링/가공하는 데이터 모듈입니다.
 - **`brokers/kis_broker.py`:** 한국투자증권(KIS) REST API 래퍼. 토큰 캐싱(`.kis_token_*.json`)을 지원하여 계좌 전환 시 재인증 지연을 방지합니다.
-- **`brokers/kiwoom_broker.py`:** 키움증권 REST API 래퍼. 실전/모의 투자 도메인 자동 분기(`api.kiwoom.com` / `mockapi.kiwoom.com`), 잔고조회(`kt00004`, `kt00018`), 주문(`kt10000`, `kt10001`), 웹소켓 실시간 시세(`0B`) 지원.
+- **`brokers/kiwoom_broker.py`:** 키움증권 REST API 래퍼. 실전/모의 투자 도메인 자동 분기(`api.kiwoom.com` / `mockapi.kiwoom.com`), 잔고조회(`kt00004`, `kt00018`), 주문/취소(`kt10000`, `kt10001`, `kt10003`), 웹소켓 실시간 시세(`0B`) 지원.
+- **`brokers/meritz_broker.py`:** 메리츠증권 Open API 래퍼. JWT `exp` 클레임 기반 정확한 토큰 만료 관리 및 캐싱(`.meritz_token_*.json`), 토큰 무효(`EGW00121`) 시 자동 재발급 재시도, 국내/해외 예수금 및 보유종목 조회(`deposit`, `holdings`, `overseas/currencies`, `overseas/holdings`), 국내 및 해외(미국 나스닥/NYSE/AMEX) 주식 매수/매도/취소/체결조회(`orders_buy`, `orders_sell`, `orders_today`, `overseas/orders/*`), 장전시간외(`61`) 및 라오어 무한매수법 LOC(`32`)/시장가/지정가 주문, 웹소켓 실시간 체결가 구독(국내 `ohhts_stck_cntg`, 해외 `ohhts_exst_cntg`) 지원.
 - **`brokers/upbit_broker.py`:** Upbit 코인 거래소 API 래퍼. 웹소켓을 통한 실시간 체결가 수신을 지원합니다.
 - **`models/schemas.py`:** Python 측 데이터 모델 클래스들(Pydantic 또는 Dataclass)이 정의되어 있으며, Android의 `TradingModels.kt`와 구조가 1:1로 매칭되어야 합니다.
 
@@ -105,6 +120,7 @@ flowchart TD
 |---|---|---|---|
 | 한국투자증권 (KIS) | 국내주식, 해외주식 | 실전 + 모의 | REST + WebSocket |
 | 키움증권 | 국내주식 | 실전 + 모의 | REST + WebSocket |
+| 메리츠증권 | 국내주식, 해외주식 | 실전 | REST + WebSocket |
 | 업비트 (Upbit) | 가상화폐 | 실전 | REST + WebSocket |
 
 ---

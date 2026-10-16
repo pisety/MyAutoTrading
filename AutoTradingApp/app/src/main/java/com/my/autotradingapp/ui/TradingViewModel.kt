@@ -1,14 +1,20 @@
 package com.my.autotradingapp.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
 import com.my.autotradingapp.data.*
 import kotlinx.coroutines.flow.StateFlow
 
-class TradingViewModel : ViewModel() {
+class TradingViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = TradingRepository()
+    private val prefs = application.getSharedPreferences("TradingApp", Context.MODE_PRIVATE)
+    private val initialUserId = prefs.getString("LastUsedUserId", "")?.trim()?.takeIf { it.isNotEmpty() } ?: "pisety"
+    private val repository = TradingRepository(initialUserId)
 
     val userId: StateFlow<String> = repository.userId
+    val profiles: StateFlow<List<UserProfile>> = repository.profiles
+    val currentProfileName: StateFlow<String> = repository.currentProfileName
     val stockStatus: StateFlow<TradingStatus> = repository.stockStatus
     val stockSettings: StateFlow<TradingSettings> = repository.stockSettings
     val laoreSettings: StateFlow<Map<String, LaoreSettings>> = repository.laoreSettings
@@ -50,6 +56,9 @@ class TradingViewModel : ViewModel() {
     fun deleteReservationOrder(orderId: String) = repository.deleteReservationOrder(orderId)
     fun markNotificationRead(key: String) = repository.markNotificationRead(key)
     fun clearNotifications() = repository.clearNotifications()
+    fun checkUserIdExists(id: String, onResult: (Boolean) -> Unit) = repository.checkUserIdExists(id, onResult)
+    fun setProfileName(id: String, name: String) = repository.setProfileName(id, name)
+    fun deleteProfile(id: String, onComplete: (Boolean, String) -> Unit) = repository.deleteProfile(id, onComplete)
 
     override fun onCleared() {
         super.onCleared()

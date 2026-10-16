@@ -222,3 +222,11 @@ data class AppNotification(
     val read: Boolean = false,
     var key: String = "" // Local property for UI
 )
+
+@IgnoreExtraProperties
+data class UserProfile(
+    val id: String = "",
+    val name: String = "",
+    val icon: String = "👤"
+)
+

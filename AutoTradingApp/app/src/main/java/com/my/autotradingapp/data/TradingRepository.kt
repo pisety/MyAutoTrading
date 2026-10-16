@@ -11,14 +11,23 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
 import java.util.*
 
-class TradingRepository {
+class TradingRepository(initialUserId: String = "pisety") {
 
     private val dbUrl = "https://my-auto-trading-9deb3-default-rtdb.asia-southeast1.firebasedatabase.app/"
     private val database = FirebaseDatabase.getInstance(dbUrl)
     
-    // 기본값 설정
-    private val _userId = MutableStateFlow("test_user")
+    // 기본값 설정 ("pisety" 우선)
+    private val _userId = MutableStateFlow(initialUserId.trim().takeIf { it.isNotEmpty() } ?: "pisety")
     val userId = _userId.asStateFlow()
+
+    // Profile state flows
+    private val _profiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    val profiles = _profiles.asStateFlow()
+
+    private val _currentProfileName = MutableStateFlow("내 계좌")
+    val currentProfileName = _currentProfileName.asStateFlow()
+
+    private var usersListener: ValueEventListener? = null
 
     // Stock state flows
     private val _stockStatus = MutableStateFlow(TradingStatus())
@@ -107,8 +116,54 @@ class TradingRepository {
 
 
     init {
+        listenToUsersProfiles()
         startListening(_userId.value)
         loadMarketData()
+    }
+
+    private fun listenToUsersProfiles() {
+        val usersRef = database.getReference("users")
+        usersListener = usersRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val list = mutableListOf<UserProfile>()
+                for (child in snapshot.children) {
+                    val uid = child.key ?: continue
+                    val rawName = child.child("profile_name").value as? String ?: ""
+                    val resolvedName = when {
+                        rawName.isNotEmpty() -> rawName
+                        uid == "pisety" -> "내 계좌"
+                        uid == "윤1" -> "윤서"
+                        uid == "윤2" -> "윤하"
+                        uid == "test_user" -> "기존(test_user)"
+                        else -> uid
+                    }
+                    val icon = when {
+                        resolvedName.contains("윤서") || resolvedName.contains("윤하") || resolvedName.contains("자녀") -> "👧"
+                        resolvedName.contains("내") || resolvedName.contains("본인") || uid == "pisety" -> "👨"
+                        else -> "👤"
+                    }
+                    list.add(UserProfile(id = uid, name = resolvedName, icon = icon))
+                }
+                val sortedList = list.sortedWith(compareBy({ it.id != "pisety" && !it.name.contains("내 계좌") }, { it.name }))
+                _profiles.value = sortedList
+                updateCurrentProfileName()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("TradingApp", "Users profiles listener cancelled: ${error.message}")
+            }
+        })
+    }
+
+    private fun updateCurrentProfileName() {
+        val currentId = _userId.value
+        val found = _profiles.value.find { it.id == currentId }
+        _currentProfileName.value = found?.name ?: when (currentId) {
+            "pisety" -> "내 계좌"
+            "윤1" -> "윤서"
+            "윤2" -> "윤하"
+            else -> currentId
+        }
     }
 
     private fun getUserPath(id: String): String {
@@ -130,11 +185,15 @@ class TradingRepository {
     fun setUserId(newId: String) {
         val trimmedId = newId.trim()
         if (trimmedId.isEmpty()) return
-        if (_userId.value == trimmedId) return
+        if (_userId.value == trimmedId) {
+            updateCurrentProfileName()
+            return
+        }
         
         Log.d("TradingApp", "Switching User ID to: $trimmedId")
         stopListening()
         _userId.value = trimmedId
+        updateCurrentProfileName()
         startListening(trimmedId)
     }
 
@@ -889,8 +948,43 @@ class TradingRepository {
         database.getReference("$servicePath/reservation_orders/$orderId").removeValue()
     }
 
+    fun checkUserIdExists(id: String, onResult: (Boolean) -> Unit) {
+        val cleanId = id.trim()
+        if (cleanId.isEmpty()) {
+            onResult(false)
+            return
+        }
+        database.getReference("users/$cleanId").get().addOnSuccessListener { snapshot ->
+            onResult(snapshot.exists())
+        }.addOnFailureListener {
+            onResult(false)
+        }
+    }
+
+    fun setProfileName(id: String, name: String) {
+        val cleanId = id.trim()
+        if (cleanId.isNotEmpty()) {
+            database.getReference("users/$cleanId/profile_name").setValue(name.trim())
+        }
+    }
+
+    fun deleteProfile(id: String, onComplete: (Boolean, String) -> Unit) {
+        val cleanId = id.trim()
+        if (cleanId.isEmpty()) {
+            onComplete(false, "ID가 비어있습니다.")
+            return
+        }
+        database.getReference("users/$cleanId").removeValue().addOnSuccessListener {
+            onComplete(true, "프로필($cleanId)이 성공적으로 삭제되었습니다.")
+        }.addOnFailureListener { e ->
+            onComplete(false, "삭제 실패: ${e.message}")
+        }
+    }
+
     fun onCleared() {
-                stopListening()
+        stopListening()
+        usersListener?.let { database.getReference("users").removeEventListener(it) }
+        usersListener = null
     }
 
     fun markNotificationRead(key: String) {
