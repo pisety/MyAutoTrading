@@ -148,7 +148,11 @@ class TradingRepository(initialUserId: String = "pisety") {
                         resolvedName.contains("내") || resolvedName.contains("본인") || uid == "pisety" -> "👨"
                         else -> "👤"
                     }
-                    list.add(UserProfile(id = uid, name = resolvedName, icon = icon))
+                    val pin = (child.child("pin").value as? String)?.takeIf { it.isNotEmpty() }
+                        ?: (child.child("stock").child("account_data").child("pin").value as? String)?.takeIf { it.isNotEmpty() }
+                        ?: (child.child("crypto").child("account_data").child("pin").value as? String)
+                        ?: ""
+                    list.add(UserProfile(id = uid, name = resolvedName, icon = icon, pin = pin))
                 }
                 val sortedList = list.sortedWith(compareBy({ it.id != "pisety" && !it.name.contains("내 계좌") }, { it.name }))
                 _profiles.value = sortedList
@@ -702,7 +706,9 @@ class TradingRepository(initialUserId: String = "pisety") {
                 .addOnSuccessListener { 
                     accRef.child("active_account_id").setValue(key)
                     if (newPinToSet.isNotEmpty()) {
-                        accRef.child("pin").setValue(CryptoUtils.encrypt(newPinToSet))
+                        val encPin = CryptoUtils.encrypt(newPinToSet)
+                        accRef.child("pin").setValue(encPin)
+                        database.getReference("users/$id/pin").setValue(encPin)
                     }
                     database.getReference("$servicePath/status").removeValue()
                     if (serviceType == "crypto") {

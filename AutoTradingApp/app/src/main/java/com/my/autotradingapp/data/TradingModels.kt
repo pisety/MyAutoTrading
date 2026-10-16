@@ -227,6 +227,7 @@ data class AppNotification(
 data class UserProfile(
     val id: String = "",
     val name: String = "",
-    val icon: String = "👤"
+    val icon: String = "👤",
+    val pin: String = ""
 )
 
