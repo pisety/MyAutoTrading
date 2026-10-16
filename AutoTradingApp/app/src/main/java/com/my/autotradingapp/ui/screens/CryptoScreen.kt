@@ -32,7 +32,7 @@ import java.util.Locale
 @Composable
 fun CryptoScreen(
     viewModel: TradingViewModel,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit = {}
 ) {
     val status by viewModel.cryptoStatus.collectAsState()
     val settings by viewModel.cryptoSettings.collectAsState()
@@ -163,21 +163,9 @@ fun CryptoScreen(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
-            // Settings button row
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End
-            ) {
-                OutlinedButton(onClick = onSettingsClick) {
-                    Text("⚙ 계좌 설정")
-                }
-            }
-        }
-
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),

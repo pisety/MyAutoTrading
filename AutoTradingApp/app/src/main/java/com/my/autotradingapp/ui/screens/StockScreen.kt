@@ -33,7 +33,7 @@ import java.util.Locale
 @Composable
 fun StockScreen(
     viewModel: TradingViewModel,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit = {}
 ) {
     val status by viewModel.stockStatus.collectAsState()
     val settings by viewModel.stockSettings.collectAsState()
@@ -196,16 +196,6 @@ fun StockScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(onClick = onSettingsClick) {
-                Text("⚙ 계좌 설정")
-            }
-        }
-        
         PrimaryTabRow(selectedTabIndex = selectedSubTab) {
             subTabs.forEachIndexed { index, title ->
                 Tab(

@@ -136,7 +136,7 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                         }
                     },
                     actions = {
-                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                        Box(modifier = Modifier.padding(end = 2.dp)) {
                             IconButton(onClick = { showNotificationDialog = true }) {
                                 Text("🔔", fontSize = 20.sp)
                             }
@@ -149,8 +149,14 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                                 }
                             }
                         }
-                        IconButton(onClick = { showProfileManagementDialog = true }) {
-                            Text("👤⚙️", fontSize = 18.sp)
+                        IconButton(onClick = {
+                            if (selectedTab == 1) {
+                                showCryptoSetup = true
+                            } else {
+                                showStockSetup = true
+                            }
+                        }) {
+                            Text("⚙️", fontSize = 20.sp)
                         }
                     }
                 )
