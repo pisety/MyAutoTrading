@@ -244,7 +244,7 @@ fun StockScreen(
                                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                val statusText = "[${brokerName} | ${if (isMock) "모의" else "실전"} | ${if (isOverseas) "해외주식" else "국내주식"}]"
+                                val statusText = if (activeAcc == null) "[계좌 미설정]" else "[${brokerName} | ${if (isMock) "모의" else "실전"} | ${if (isOverseas) "해외주식" else "국내주식"}]"
                                 Text(text = statusText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
                                 
                                 Text(text = "총 평가자산", style = MaterialTheme.typography.labelLarge)
@@ -285,7 +285,12 @@ fun StockScreen(
                     val visibleHoldings = status.holdingStocks.filter { it.value.currentPrice > 0.0 && (it.value.currentPrice * it.value.quantity) > threshold }
                     if (visibleHoldings.isEmpty()) {
                         item {
-                            Text("보유 중인 종목이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
+                            val emptyMsg = if (activeAcc == null) {
+                                "연동된 증권 계좌가 없습니다. '⚙ 계좌 설정'에서 계좌를 등록해 주세요."
+                            } else {
+                                "보유 중인 종목이 없습니다."
+                            }
+                            Text(emptyMsg, color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
                         }
                     } else {
                         items(visibleHoldings.toList()) { (symbol, stock) ->

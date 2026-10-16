@@ -188,7 +188,7 @@ fun CryptoScreen(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "[${brokerName}]", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(text = if (activeAcc == null) "[계좌 미설정]" else "[${brokerName}]", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
                     
                     Text(text = "총 평가자산", style = MaterialTheme.typography.labelLarge)
                     Text(
@@ -238,7 +238,12 @@ fun CryptoScreen(
             val visibleHoldings = status.holdingStocks.filter { it.value.currentPrice > 0.0 && (it.value.currentPrice * it.value.quantity) > 500.0 }
             if (visibleHoldings.isEmpty()) {
                 item {
-                    Text("보유 중인 코인이 없습니다.", color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
+                    val emptyMsg = if (activeAcc == null) {
+                        "연동된 코인 거래소 계좌가 없습니다. '⚙ 계좌 설정'에서 계좌를 등록해 주세요."
+                    } else {
+                        "보유 중인 코인이 없습니다."
+                    }
+                    Text(emptyMsg, color = Color.Gray, modifier = Modifier.padding(vertical = 8.dp))
                 }
             } else {
                 items(visibleHoldings.toList()) { (symbol, stock) ->

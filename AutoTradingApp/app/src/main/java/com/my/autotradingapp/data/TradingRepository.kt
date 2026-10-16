@@ -104,8 +104,8 @@ class TradingRepository(initialUserId: String = "pisety") {
     private var stockReservationListener: ValueEventListener? = null
     private var notificationsListener: ValueEventListener? = null
 
-    private var stockActiveAccountId = ""
-    private var cryptoActiveAccountId = ""
+    private var stockActiveAccountId: String? = null
+    private var cryptoActiveAccountId: String? = null
 
     private var stockStatusRef: com.google.firebase.database.DatabaseReference? = null
     private var stockSettingsRef: com.google.firebase.database.DatabaseReference? = null
@@ -185,7 +185,7 @@ class TradingRepository(initialUserId: String = "pisety") {
     private fun getAccountPath(id: String, serviceType: String): String {
         val servicePath = getServicePath(id, serviceType)
         val activeId = if (serviceType == "crypto") cryptoActiveAccountId else stockActiveAccountId
-        return if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
+        return if (!activeId.isNullOrEmpty()) "$servicePath/accounts/$activeId" else servicePath
     }
 
     private fun getServicePath(id: String, serviceType: String): String {
@@ -266,16 +266,43 @@ class TradingRepository(initialUserId: String = "pisety") {
         })
     }
 
-    private fun restartStockAccountSpecificListeners(servicePath: String, activeId: String) {
-        val accountPath = if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
-        Log.d("TradingApp", "Restarting Stock listeners on $accountPath")
-        
+    private fun stopStockAccountSpecificListeners() {
         stockStatusListener?.let { stockStatusRef?.removeEventListener(it) }
         stockSettingsListener?.let { stockSettingsRef?.removeEventListener(it) }
         stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
         laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
         laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
         stockReservationListener?.let { stockReservationRef?.removeEventListener(it) }
+
+        stockStatusListener = null
+        stockSettingsListener = null
+        stockOrderListener = null
+        laoreSettingsListener = null
+        laoreStatusListener = null
+        stockReservationListener = null
+
+        stockStatusRef = null
+        stockSettingsRef = null
+        stockOrderRef = null
+        laoreSettingsRef = null
+        laoreStatusRef = null
+        stockReservationRef = null
+    }
+
+    private fun restartStockAccountSpecificListeners(servicePath: String, activeId: String) {
+        stopStockAccountSpecificListeners()
+
+        if (activeId.isEmpty()) {
+            _stockStatus.value = TradingStatus()
+            _stockSettings.value = TradingSettings()
+            _laoreSettings.value = emptyMap()
+            _laoreStatus.value = emptyMap()
+            _reservationOrders.value = emptyMap()
+            return
+        }
+
+        val accountPath = "$servicePath/accounts/$activeId"
+        Log.d("TradingApp", "Restarting Stock listeners on $accountPath")
 
         stockStatusRef = database.getReference("$accountPath/status")
         stockSettingsRef = database.getReference("$accountPath/settings")
@@ -284,53 +311,41 @@ class TradingRepository(initialUserId: String = "pisety") {
         laoreStatusRef = database.getReference("$accountPath/laore_status")
         stockReservationRef = database.getReference("$accountPath/reservation_orders")
 
-        if (stockStatusListener == null) {
-            stockStatusListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _stockStatus.value = parseStatus(snapshot, accountPath)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        stockStatusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _stockStatus.value = parseStatus(snapshot, accountPath)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (stockSettingsListener == null) {
-            stockSettingsListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _stockSettings.value = parseSettings(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        stockSettingsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _stockSettings.value = parseSettings(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (stockOrderListener == null) {
-            stockOrderListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    parseOrderStatus(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        stockOrderListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                parseOrderStatus(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (laoreSettingsListener == null) {
-            laoreSettingsListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _laoreSettings.value = parseLaoreSettings(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        laoreSettingsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _laoreSettings.value = parseLaoreSettings(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (laoreStatusListener == null) {
-            laoreStatusListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _laoreStatus.value = parseLaoreStatus(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        laoreStatusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _laoreStatus.value = parseLaoreStatus(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (stockReservationListener == null) {
-            stockReservationListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _reservationOrders.value = parseReservationOrders(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        stockReservationListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _reservationOrders.value = parseReservationOrders(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
 
         stockStatusRef?.addValueEventListener(stockStatusListener!!)
@@ -341,15 +356,39 @@ class TradingRepository(initialUserId: String = "pisety") {
         stockReservationRef?.addValueEventListener(stockReservationListener!!)
     }
 
-    private fun restartCryptoAccountSpecificListeners(servicePath: String, activeId: String) {
-        val accountPath = if (activeId.isNotEmpty()) "$servicePath/accounts/$activeId" else servicePath
-        Log.d("TradingApp", "Restarting Crypto listeners on $accountPath")
-        
+    private fun stopCryptoAccountSpecificListeners() {
         cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
         cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
         cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
         cryptoLaoreSettingsListener?.let { cryptoLaoreSettingsRef?.removeEventListener(it) }
         cryptoLaoreStatusListener?.let { cryptoLaoreStatusRef?.removeEventListener(it) }
+
+        cryptoStatusListener = null
+        cryptoSettingsListener = null
+        cryptoOrderListener = null
+        cryptoLaoreSettingsListener = null
+        cryptoLaoreStatusListener = null
+
+        cryptoStatusRef = null
+        cryptoSettingsRef = null
+        cryptoOrderRef = null
+        cryptoLaoreSettingsRef = null
+        cryptoLaoreStatusRef = null
+    }
+
+    private fun restartCryptoAccountSpecificListeners(servicePath: String, activeId: String) {
+        stopCryptoAccountSpecificListeners()
+
+        if (activeId.isEmpty()) {
+            _cryptoStatus.value = TradingStatus()
+            _cryptoSettings.value = TradingSettings()
+            _cryptoLaoreSettings.value = emptyMap()
+            _cryptoLaoreStatus.value = emptyMap()
+            return
+        }
+
+        val accountPath = "$servicePath/accounts/$activeId"
+        Log.d("TradingApp", "Restarting Crypto listeners on $accountPath")
 
         cryptoStatusRef = database.getReference("$accountPath/status")
         cryptoSettingsRef = database.getReference("$accountPath/settings")
@@ -357,45 +396,35 @@ class TradingRepository(initialUserId: String = "pisety") {
         cryptoLaoreSettingsRef = database.getReference("$accountPath/laore_settings")
         cryptoLaoreStatusRef = database.getReference("$accountPath/laore_status")
 
-        if (cryptoStatusListener == null) {
-            cryptoStatusListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _cryptoStatus.value = parseStatus(snapshot, accountPath)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        cryptoStatusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _cryptoStatus.value = parseStatus(snapshot, accountPath)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (cryptoSettingsListener == null) {
-            cryptoSettingsListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _cryptoSettings.value = parseSettings(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        cryptoSettingsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _cryptoSettings.value = parseSettings(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (cryptoOrderListener == null) {
-            cryptoOrderListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    parseOrderStatus(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        cryptoOrderListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                parseOrderStatus(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (cryptoLaoreSettingsListener == null) {
-            cryptoLaoreSettingsListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _cryptoLaoreSettings.value = parseLaoreSettings(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        cryptoLaoreSettingsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _cryptoLaoreSettings.value = parseLaoreSettings(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
-        if (cryptoLaoreStatusListener == null) {
-            cryptoLaoreStatusListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    _cryptoLaoreStatus.value = parseLaoreStatus(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
+        cryptoLaoreStatusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                _cryptoLaoreStatus.value = parseLaoreStatus(snapshot)
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
 
         cryptoStatusRef?.addValueEventListener(cryptoStatusListener!!)
@@ -621,38 +650,51 @@ class TradingRepository(initialUserId: String = "pisety") {
         database.getReference("$servicePath/account_data/pin").setValue(CryptoUtils.encrypt(pin))
     }
 
+    private fun resetUserData() {
+        _stockStatus.value = TradingStatus()
+        _stockSettings.value = TradingSettings()
+        _stockAccountData.value = UserAccountData()
+        _laoreSettings.value = emptyMap()
+        _laoreStatus.value = emptyMap()
+        _reservationOrders.value = emptyMap()
+
+        _cryptoStatus.value = TradingStatus()
+        _cryptoSettings.value = TradingSettings()
+        _cryptoAccountData.value = UserAccountData()
+        _cryptoLaoreSettings.value = emptyMap()
+        _cryptoLaoreStatus.value = emptyMap()
+
+        _notifications.value = emptyList()
+        _manualOrderStatus.value = null
+    }
+
     private fun stopListening() {
         val oldId = _userId.value
         val stockPath = getServicePath(oldId, "stock")
         val cryptoPath = getServicePath(oldId, "crypto")
 
-        stockStatusListener?.let { stockStatusRef?.removeEventListener(it) }
-        stockSettingsListener?.let { stockSettingsRef?.removeEventListener(it) }
+        stopStockAccountSpecificListeners()
+        stopCryptoAccountSpecificListeners()
+
         stockAccountListener?.let {
-            database.getReference(getServicePath(oldId, "stock") + "/account_data").removeEventListener(it)
+            database.getReference("$stockPath/account_data").removeEventListener(it)
         }
         stockAccountListener = null
-        
+
+        cryptoAccountListener?.let {
+            database.getReference("$cryptoPath/account_data").removeEventListener(it)
+        }
+        cryptoAccountListener = null
+
         notificationsListener?.let {
-            val id = _userId.value
-            database.getReference("users/$id/notifications").removeEventListener(it)
+            database.getReference("users/$oldId/notifications").removeEventListener(it)
         }
         notificationsListener = null
 
-        stockOrderListener?.let { stockOrderRef?.removeEventListener(it) }
-        laoreSettingsListener?.let { laoreSettingsRef?.removeEventListener(it) }
-        laoreStatusListener?.let { laoreStatusRef?.removeEventListener(it) }
-        stockReservationListener?.let { stockReservationRef?.removeEventListener(it) }
+        stockActiveAccountId = null
+        cryptoActiveAccountId = null
 
-        cryptoStatusListener?.let { cryptoStatusRef?.removeEventListener(it) }
-        cryptoSettingsListener?.let { cryptoSettingsRef?.removeEventListener(it) }
-        cryptoAccountListener?.let { database.getReference("$cryptoPath/account_data").removeEventListener(it) }
-        cryptoOrderListener?.let { cryptoOrderRef?.removeEventListener(it) }
-        cryptoLaoreSettingsListener?.let { cryptoLaoreSettingsRef?.removeEventListener(it) }
-        cryptoLaoreStatusListener?.let { cryptoLaoreStatusRef?.removeEventListener(it) }
-        
-        stockActiveAccountId = ""
-        cryptoActiveAccountId = ""
+        resetUserData()
     }
 
     fun saveAccountSecurely(info: AccountInfo, newPinToSet: String, currentlyVerifiedPin: String, serviceType: String, onComplete: (Boolean, String) -> Unit) {
