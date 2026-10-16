@@ -198,7 +198,7 @@ class UpbitBroker(BaseBroker):
                         logger.warning("Upbit ticker bulk fetch 404. Falling back to individual fetch to skip delisted coins.")
                         for m in markets:
                             try:
-                                async with session.get(url, params={"markets": m}, timeout=aiohttp.ClientTimeout(total=5)) as single_res:
+                                async with session.get(f"{self.base_url}/ticker", params={"markets": m}, timeout=aiohttp.ClientTimeout(total=5)) as single_res:
                                     if single_res.status == 200:
                                         data = await single_res.json()
                                         if data and len(data) > 0:

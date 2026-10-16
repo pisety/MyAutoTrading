@@ -11,9 +11,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.my.autotradingapp.data.AccountInfo
 import com.my.autotradingapp.ui.TradingViewModel
 import com.my.autotradingapp.utils.CryptoUtils
@@ -23,18 +25,11 @@ import com.my.autotradingapp.utils.CryptoUtils
 fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) {
     val accountData by viewModel.stockAccountData.collectAsState()
     val currentUserId by viewModel.userId.collectAsState()
+    val currentProfileName by viewModel.currentProfileName.collectAsState()
     val activeAcc = accountData.savedAccounts[accountData.activeAccountId]
     
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("TradingApp", android.content.Context.MODE_PRIVATE)
-    val history = remember { 
-        prefs.getStringSet("UserIdHistory", emptySet())?.toList()
-            ?.filter { !it.contains("_MOCK_") && !it.contains("_REAL_") } 
-            ?: emptyList() 
-    }
-    
-    var userIdInput by remember { mutableStateOf(currentUserId) }
-    var userIdExpanded by remember { mutableStateOf(false) }
     
     var broker by remember { mutableStateOf(activeAcc?.broker ?: "한국투자") }
     var isMock by remember { mutableStateOf(activeAcc?.isMock ?: true) }
@@ -50,12 +45,15 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
     var isPinVerified by remember { mutableStateOf(false) }
     var showPinDialog by remember { mutableStateOf(false) }
 
-    val brokers = listOf("한국투자", "키움", "미래에셋")
+    val brokers = listOf("한국투자", "키움", "메리츠")
     var brokerExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(broker) {
         if (broker == "키움") {
             isOverseas = false
+        }
+        if (broker == "메리츠") {
+            isMock = false
         }
     }
 
@@ -103,47 +101,22 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("주식 계좌 및 UID 설정", style = MaterialTheme.typography.headlineSmall)
+        Text("주식 계좌 설정", style = MaterialTheme.typography.headlineSmall)
 
-        ExposedDropdownMenuBox(
-            expanded = userIdExpanded,
-            onExpandedChange = { userIdExpanded = !userIdExpanded }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
         ) {
-            OutlinedTextField(
-                value = userIdInput,
-                onValueChange = { userIdInput = it },
-                label = { Text("User ID (Firebase 노드)") },
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { 
-                    TextButton(onClick = { 
-                        if (userIdInput != currentUserId) {
-                            isPinVerified = false
-                            viewModel.setUserId(userIdInput)
-                        }
-                    }) {
-                        Text("불러오기")
-                    }
-                }
-            )
-            if (history.isNotEmpty()) {
-                ExposedDropdownMenu(
-                    expanded = userIdExpanded,
-                    onDismissRequest = { userIdExpanded = false }
-                ) {
-                    history.forEach { histId ->
-                        DropdownMenuItem(
-                            text = { Text(histId) },
-                            onClick = {
-                                userIdInput = histId
-                                userIdExpanded = false
-                                if (histId != currentUserId) {
-                                    isPinVerified = false
-                                    viewModel.setUserId(histId)
-                                    prefs.edit().putString("LastUsedUserId", histId).apply()
-                                }
-                            }
-                        )
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("설정 대상 계정 프로필", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text("$currentProfileName (ID: $currentUserId)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -188,9 +161,9 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("투자 구분", style = MaterialTheme.typography.labelMedium)
-                Row(modifier = Modifier.clickable { isMock = true }, verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = isMock, onClick = { isMock = true })
-                    Text("모의")
+                Row(modifier = Modifier.clickable(enabled = broker != "메리츠") { isMock = true }, verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = isMock, onClick = { isMock = true }, enabled = broker != "메리츠")
+                    Text("모의" + if (broker == "메리츠") " (미지원)" else "")
                 }
                 Row(modifier = Modifier.clickable { isMock = false }, verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = !isMock, onClick = { isMock = false })
@@ -205,7 +178,7 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                 }
                 Row(modifier = Modifier.clickable(enabled = broker != "키움") { isOverseas = true }, verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = isOverseas, onClick = { isOverseas = true }, enabled = broker != "키움")
-                    Text("해외" + if (broker == "키움") " (지원안함)" else "")
+                    Text("해외" + if (broker == "키움") " (미지원)" else "")
                 }
             }
         }
@@ -249,8 +222,6 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
 
         Button(
             onClick = {
-                viewModel.setUserId(userIdInput)
-                prefs.edit().putString("LastUsedUserId", userIdInput).apply()
                 viewModel.clearAuthErrorLocally("stock")
                 viewModel.saveAccountSecurely(
                     AccountInfo(broker, isMock, isOverseas, accountNumber, appKey, appSecret),
@@ -260,7 +231,6 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     if (success) {
-                        prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
                         onDismiss()
                     }
                 }
@@ -283,7 +253,6 @@ fun StockAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) 
                 isPinVerified = true
                 showPinDialog = false
                 verifyPinInput = ""
-                prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
                 if (savePinChecked) {
                     prefs.edit().putString("SavedPin_stock_$currentUserId", accountData.pin).apply()
                 } else {
