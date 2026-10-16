@@ -17,11 +17,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.messaging.FirebaseMessaging
 import com.my.autotradingapp.ui.TradingViewModel
 import com.my.autotradingapp.ui.theme.AutoTradingAppTheme
 import com.my.autotradingapp.ui.components.NotificationListDialog
+import com.my.autotradingapp.ui.components.ProfileManagementDialog
 import com.my.autotradingapp.ui.screens.StockScreen
 import com.my.autotradingapp.ui.screens.CryptoScreen
 import com.my.autotradingapp.ui.screens.LaoreScreen
@@ -59,8 +63,11 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     
     val currentUserId by viewModel.userId.collectAsState()
+    val profiles by viewModel.profiles.collectAsState()
+    val currentProfileName by viewModel.currentProfileName.collectAsState()
     val notifications by viewModel.notifications.collectAsState()
     var showNotificationDialog by remember { mutableStateOf(false) }
+    var showProfileManagementDialog by remember { mutableStateOf(false) }
     val unreadCount = notifications.count { !it.read }
     
     val context = LocalContext.current
@@ -78,7 +85,7 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             }
         }
         val lastUserId = prefs.getString("LastUsedUserId", "")
-        if (!lastUserId.isNullOrEmpty() && currentUserId.isEmpty()) {
+        if (!lastUserId.isNullOrEmpty() && currentUserId != lastUserId) {
             viewModel.setUserId(lastUserId)
         }
     }
@@ -99,24 +106,84 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("자동매매 Pro") },
-                actions = {
-                    Box(modifier = Modifier.padding(end = 12.dp)) {
-                        IconButton(onClick = { showNotificationDialog = true }) {
-                            Text("🔔", fontSize = 20.sp)
+            Column {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("자동매매 Pro", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "활성: $currentProfileName ($currentUserId)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        if (unreadCount > 0) {
-                            Badge(
-                                modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp),
-                                containerColor = MaterialTheme.colorScheme.error
-                            ) {
-                                Text(unreadCount.toString(), color = Color.White)
+                    },
+                    actions = {
+                        Box(modifier = Modifier.padding(end = 4.dp)) {
+                            IconButton(onClick = { showNotificationDialog = true }) {
+                                Text("🔔", fontSize = 20.sp)
+                            }
+                            if (unreadCount > 0) {
+                                Badge(
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp),
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ) {
+                                    Text(unreadCount.toString(), color = Color.White)
+                                }
+                            }
+                        }
+                        IconButton(onClick = { showProfileManagementDialog = true }) {
+                            Text("👤⚙️", fontSize = 18.sp)
+                        }
+                    }
+                )
+
+                // Profile Switcher Chips Bar (가족 계정 간 원클릭 전환)
+                if (profiles.isNotEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(profiles) { profile ->
+                                val isSelected = profile.id == currentUserId
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        if (!isSelected) {
+                                            viewModel.setUserId(profile.id)
+                                            prefs.edit().putString("LastUsedUserId", profile.id).apply()
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "${profile.icon} ${profile.name}",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                )
+                            }
+                            item {
+                                AssistChip(
+                                    onClick = { showProfileManagementDialog = true },
+                                    label = { Text("➕ 관리", fontSize = 12.sp) }
+                                )
                             }
                         }
                     }
                 }
-            )
+            }
         },
         bottomBar = {
             NavigationBar(
@@ -190,6 +257,13 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             onDismiss = { showNotificationDialog = false },
             onNotificationClick = { key -> viewModel.markNotificationRead(key) },
             onClearAll = { viewModel.clearNotifications() }
+        )
+    }
+
+    if (showProfileManagementDialog) {
+        ProfileManagementDialog(
+            viewModel = viewModel,
+            onDismiss = { showProfileManagementDialog = false }
         )
     }
 }

@@ -10,9 +10,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.my.autotradingapp.data.AccountInfo
 import com.my.autotradingapp.ui.TradingViewModel
 import com.my.autotradingapp.utils.CryptoUtils
@@ -22,18 +24,11 @@ import com.my.autotradingapp.utils.CryptoUtils
 fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel) {
     val accountData by viewModel.cryptoAccountData.collectAsState()
     val currentUserId by viewModel.userId.collectAsState()
+    val currentProfileName by viewModel.currentProfileName.collectAsState()
     val activeAcc = accountData.savedAccounts[accountData.activeAccountId]
     
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("TradingApp", android.content.Context.MODE_PRIVATE)
-    val history = remember { 
-        prefs.getStringSet("UserIdHistory", emptySet())?.toList()
-            ?.filter { !it.contains("_MOCK_") && !it.contains("_REAL_") } 
-            ?: emptyList() 
-    }
-    
-    var userIdInput by remember { mutableStateOf(currentUserId) }
-    var userIdExpanded by remember { mutableStateOf(false) }
     
     // Crypto: broker is always 업비트, no mock/real, no overseas, no account number
     var appKey by remember { mutableStateOf("") }
@@ -87,47 +82,22 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("코인 계좌 및 UID 설정", style = MaterialTheme.typography.headlineSmall)
+        Text("코인 계좌 설정", style = MaterialTheme.typography.headlineSmall)
 
-        ExposedDropdownMenuBox(
-            expanded = userIdExpanded,
-            onExpandedChange = { userIdExpanded = !userIdExpanded }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
         ) {
-            OutlinedTextField(
-                value = userIdInput,
-                onValueChange = { userIdInput = it },
-                label = { Text("User ID (Firebase 노드)") },
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { 
-                    TextButton(onClick = { 
-                        if (userIdInput != currentUserId) {
-                            isPinVerified = false
-                            viewModel.setUserId(userIdInput)
-                        }
-                    }) {
-                        Text("불러오기")
-                    }
-                }
-            )
-            if (history.isNotEmpty()) {
-                ExposedDropdownMenu(
-                    expanded = userIdExpanded,
-                    onDismissRequest = { userIdExpanded = false }
-                ) {
-                    history.forEach { histId ->
-                        DropdownMenuItem(
-                            text = { Text(histId) },
-                            onClick = {
-                                userIdInput = histId
-                                userIdExpanded = false
-                                if (histId != currentUserId) {
-                                    isPinVerified = false
-                                    viewModel.setUserId(histId)
-                                    prefs.edit().putString("LastUsedUserId", histId).apply()
-                                }
-                            }
-                        )
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("설정 대상 계정 프로필", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text("$currentProfileName (ID: $currentUserId)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -183,8 +153,6 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
 
         Button(
             onClick = {
-                viewModel.setUserId(userIdInput)
-                prefs.edit().putString("LastUsedUserId", userIdInput).apply()
                 viewModel.clearAuthErrorLocally("crypto")
                 viewModel.saveAccountSecurely(
                     AccountInfo("업비트", false, false, "", appKey, appSecret),
@@ -194,7 +162,6 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
                 ) { success, msg ->
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     if (success) {
-                        prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
                         onDismiss()
                     }
                 }
@@ -217,7 +184,6 @@ fun CryptoAccountSetupScreen(onDismiss: () -> Unit, viewModel: TradingViewModel)
                 isPinVerified = true
                 showPinDialog = false
                 verifyPinInput = ""
-                prefs.edit().putStringSet("UserIdHistory", history.toSet() + userIdInput).apply()
                 if (savePinChecked) {
                     prefs.edit().putString("SavedPin_crypto_$currentUserId", accountData.pin).apply()
                 } else {
