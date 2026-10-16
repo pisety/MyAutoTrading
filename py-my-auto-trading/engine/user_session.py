@@ -427,7 +427,7 @@ class UserSession:
                 if not self._running:
                     break
                 now = time.time()
-                if (self.broker or self.account_data.accounts) and (now - last_sync >= 1.0):
+                if (self.broker or getattr(self.account_data, "saved_accounts", None)) and (now - last_sync >= 1.0):
                     kst = timezone(timedelta(hours=9))
                     self.fb.set_data(f"{self.account_path}/status/stock_prices", self.price_data)
                     self.fb.set_data(f"{self.account_path}/status/stock_prices_change", self.price_change_data)
