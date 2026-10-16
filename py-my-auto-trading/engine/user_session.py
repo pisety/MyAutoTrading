@@ -111,18 +111,26 @@ class UserSession:
         except Exception:
             pass
 
+    def _remove_all_listeners(self):
+        try:
+            self.fb.remove_listener(f"{self.base_path}/account_data")
+            paths = ["settings", "manual_orders", "conditional_orders", "stop_loss_orders"]
+            for p in paths:
+                self.fb.remove_listener(f"{self.account_path}/{p}")
+        except Exception as e:
+            logger.error(f"Error removing listeners for {self.uid}: {e}")
+
     async def stop(self):
         logger.info(f"Stopping session for user: {self.uid}")
         self._running = False
         if self._main_task:
             self._main_task.cancel()
+        if self._restart_task:
+            self._restart_task.cancel()
         if self.broker:
             await self._cleanup_broker(self.broker)
         
-        self.fb.remove_listener(f"{self.base_path}/account_data")
-        paths = ["settings", "manual_orders", "conditional_orders", "stop_loss_orders"]
-        for p in paths:
-            self.fb.remove_listener(f"{self.account_path}/{p}")
+        await asyncio.to_thread(self._remove_all_listeners)
 
     def _load_account_data(self):
         data = self.fb.get_data(f"{self.base_path}/account_data")
@@ -416,8 +424,10 @@ class UserSession:
         
         while self._running:
             try:
+                if not self._running:
+                    break
                 now = time.time()
-                if now - last_sync >= 1.0:
+                if (self.broker or self.account_data.accounts) and (now - last_sync >= 1.0):
                     kst = timezone(timedelta(hours=9))
                     self.fb.set_data(f"{self.account_path}/status/stock_prices", self.price_data)
                     self.fb.set_data(f"{self.account_path}/status/stock_prices_change", self.price_change_data)

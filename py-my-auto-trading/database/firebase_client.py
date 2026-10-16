@@ -53,7 +53,11 @@ class FirebaseClient:
         except Exception as e:
             logger.error(f"Error updating data at {path}: {e}")
 
-
+    def delete_data(self, path: str):
+        try:
+            db.reference(path).delete()
+        except Exception as e:
+            logger.error(f"Error deleting data at {path}: {e}")
 
     async def async_get_data(self, path: str) -> Any:
         return await asyncio.to_thread(self.get_data, path)
@@ -63,6 +67,9 @@ class FirebaseClient:
 
     async def async_update_data(self, path: str, data: dict):
         await asyncio.to_thread(self.update_data, path, data)
+
+    async def async_delete_data(self, path: str):
+        await asyncio.to_thread(self.delete_data, path)
 
     def listen(self, path: str, callback: Callable[[Any], None]):
         """

@@ -134,13 +134,13 @@ class TradingRepository(initialUserId: String = "pisety") {
                 val list = mutableListOf<UserProfile>()
                 for (child in snapshot.children) {
                     val uid = child.key ?: continue
+                    if (uid == "test_user") continue
                     val rawName = child.child("profile_name").value as? String ?: ""
                     val resolvedName = when {
                         rawName.isNotEmpty() -> rawName
                         uid == "pisety" -> "내 계좌"
                         uid == "윤1" -> "윤서"
                         uid == "윤2" -> "윤하"
-                        uid == "test_user" -> "기존(test_user)"
                         else -> uid
                     }
                     val icon = when {
@@ -172,7 +172,6 @@ class TradingRepository(initialUserId: String = "pisety") {
             "pisety" -> "내 계좌"
             "윤1" -> "윤서"
             "윤2" -> "윤하"
-            "test_user" -> "기존 계정"
             else -> currentId
         }
     }
@@ -787,7 +786,7 @@ class TradingRepository(initialUserId: String = "pisety") {
 
     fun saveFcmToken(token: String) {
         val id = _userId.value
-        if (id.isNotEmpty()) {
+        if (id.isNotEmpty() && id != "test_user") {
             database.reference.child("users").child(id).child("fcm_token").setValue(token)
         }
     }
@@ -1028,6 +1027,9 @@ class TradingRepository(initialUserId: String = "pisety") {
         if (cleanId.isEmpty()) {
             onComplete(false, "ID가 비어있습니다.")
             return
+        }
+        if (_userId.value == cleanId) {
+            setUserId("pisety")
         }
         database.getReference("users/$cleanId").removeValue().addOnSuccessListener {
             onComplete(true, "프로필($cleanId)이 성공적으로 삭제되었습니다.")
