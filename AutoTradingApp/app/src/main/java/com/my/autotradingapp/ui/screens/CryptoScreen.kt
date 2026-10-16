@@ -197,13 +197,24 @@ fun CryptoScreen(
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                         Text(text = "수익률: ", style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = "${String.format(Locale.US, "%.2f", status.currentYield)}%",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (status.currentYield >= 0) Color(0xFFD32F2F) else Color(0xFF1976D2)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(text = "보유 현금: ", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "₩${NumberFormat.getNumberInstance(Locale.US).format(status.availCash)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
 
