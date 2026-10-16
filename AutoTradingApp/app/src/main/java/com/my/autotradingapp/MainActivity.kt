@@ -107,7 +107,12 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
         }
     }
 
+    var showStockSetup by remember { mutableStateOf(false) }
+    var showCryptoSetup by remember { mutableStateOf(false) }
+
     LaunchedEffect(currentUserId) {
+        showStockSetup = false
+        showCryptoSetup = false
         if (currentUserId.isNotEmpty()) {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (task.isSuccessful) {
@@ -116,9 +121,6 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             }
         }
     }
-
-    var showStockSetup by remember { mutableStateOf(false) }
-    var showCryptoSetup by remember { mutableStateOf(false) }
     
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -184,6 +186,8 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                                     onClick = {
                                         if (!isSelected) {
                                             if (isUnlocked) {
+                                                showStockSetup = false
+                                                showCryptoSetup = false
                                                 viewModel.setUserId(profile.id)
                                                 prefs.edit().putString("LastUsedUserId", profile.id).apply()
                                             } else {
@@ -317,6 +321,8 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
                 val targetId = target.id
                 unlockedProfiles = unlockedProfiles + targetId
                 if (currentUserId != targetId) {
+                    showStockSetup = false
+                    showCryptoSetup = false
                     viewModel.setUserId(targetId)
                     prefs.edit().putString("LastUsedUserId", targetId).apply()
                 }
