@@ -24,7 +24,7 @@ class TradingRepository(initialUserId: String = "pisety") {
     private val _profiles = MutableStateFlow<List<UserProfile>>(emptyList())
     val profiles = _profiles.asStateFlow()
 
-    private val _currentProfileName = MutableStateFlow("내 계좌")
+    private val _currentProfileName = MutableStateFlow("")
     val currentProfileName = _currentProfileName.asStateFlow()
 
     private var usersListener: ValueEventListener? = null
@@ -162,6 +162,7 @@ class TradingRepository(initialUserId: String = "pisety") {
             "pisety" -> "내 계좌"
             "윤1" -> "윤서"
             "윤2" -> "윤하"
+            "test_user" -> "기존 계정"
             else -> currentId
         }
     }

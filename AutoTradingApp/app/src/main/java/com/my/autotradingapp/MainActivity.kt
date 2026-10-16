@@ -85,8 +85,12 @@ fun MainContent(viewModel: TradingViewModel = viewModel()) {
             }
         }
         val lastUserId = prefs.getString("LastUsedUserId", "")
-        if (!lastUserId.isNullOrEmpty() && currentUserId != lastUserId) {
-            viewModel.setUserId(lastUserId)
+        val targetId = if (lastUserId.isNullOrEmpty() || lastUserId == "test_user") "pisety" else lastUserId
+        if (currentUserId != targetId) {
+            viewModel.setUserId(targetId)
+        }
+        if (lastUserId == "test_user" || lastUserId.isNullOrEmpty()) {
+            prefs.edit().putString("LastUsedUserId", targetId).apply()
         }
     }
 

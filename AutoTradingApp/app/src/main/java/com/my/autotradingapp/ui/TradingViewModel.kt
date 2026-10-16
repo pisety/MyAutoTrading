@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 class TradingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("TradingApp", Context.MODE_PRIVATE)
-    private val initialUserId = prefs.getString("LastUsedUserId", "")?.trim()?.takeIf { it.isNotEmpty() } ?: "pisety"
+    private val initialUserId = prefs.getString("LastUsedUserId", "")?.trim()?.takeIf { it.isNotEmpty() && it != "test_user" } ?: "pisety"
     private val repository = TradingRepository(initialUserId)
 
     val userId: StateFlow<String> = repository.userId
